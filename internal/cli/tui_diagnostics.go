@@ -19,7 +19,7 @@ const (
 	tuiDiagnosticLogLimit     = 4 << 20
 	tuiDiagnosticLogRetention = 7 * 24 * time.Hour
 	tuiWatchdogInterval       = time.Second
-	tuiWatchdogStall          = 10 * time.Second
+	tuiWatchdogStall          = 5 * time.Minute
 )
 
 // tuiDiagnostics owns process-level diagnostics while an interactive terminal
