@@ -21,6 +21,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/extension/dispatch"
+	"reasonix/internal/harness"
 	"reasonix/internal/instruction"
 	"reasonix/internal/jobs"
 	"reasonix/internal/memory"
@@ -409,6 +410,13 @@ type Agent struct {
 	// provider-visible tool schemas or prompts.
 	mutationObserver *checkpoint.MutationObserver
 
+	// verificationHarness runs post-mutation automated verification checks.
+	verificationHarness *harness.Harness
+	// backtrackGuard tracks consecutive failure strikes and triggers auto-rollback.
+	backtrackGuard *harness.BacktrackGuard
+	// shadowStore records pre-mutation git diff patches for /undo operations.
+	shadowStore *checkpoint.ShadowStore
+
 	// jobs, when non-nil, is the session's background-job manager. executeOne
 	// stamps it onto each tool call's context so the background tools (bash
 	// run_in_background, task run_in_background, bash_output/kill_shell/wait) can
@@ -789,6 +797,15 @@ func (a *Agent) MutationObserver() *checkpoint.MutationObserver {
 	}
 	return a.mutationObserver
 }
+
+// SetVerificationHarness installs the automated verification harness loop.
+func (a *Agent) SetVerificationHarness(h *harness.Harness) { a.verificationHarness = h }
+
+// SetBacktrackGuard installs the 3-strike backtrack and rollback guard.
+func (a *Agent) SetBacktrackGuard(b *harness.BacktrackGuard) { a.backtrackGuard = b }
+
+// SetShadowStore installs the shadow checkpoint store for atomic undo operations.
+func (a *Agent) SetShadowStore(s *checkpoint.ShadowStore) { a.shadowStore = s }
 
 // Session returns the agent's current conversation, useful for persistence
 // hooks that need to read the message log between turns. sessMu serialises this

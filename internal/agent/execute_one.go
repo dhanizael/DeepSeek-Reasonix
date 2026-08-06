@@ -66,7 +66,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out too
 	plan := &toolCallPlan{call: call}
 	defer func() {
 		if plan.mutationObserved && !plan.mutationAfterDone {
-			a.observeAfterMutation(plan)
+			a.observeAfterMutation(ctx, plan, nil)
 		}
 		if plan.releaseMutationWrite != nil {
 			plan.releaseMutationWrite()
@@ -796,7 +796,7 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	}
 	// Always re-read after post hooks — partial writes and hook side effects can
 	// change the previewed path even when the concrete tool returned an error.
-	a.observeAfterMutation(plan)
+	a.observeAfterMutation(ctx, plan, &result)
 	plan.mutationAfterDone = true
 	if a.recoveryGate != nil {
 		a.observeRecoveryResult(ctx, evidenceName, evidenceArgs, readOnly, mutates, result, err, false, false, recoveryGen)
@@ -902,14 +902,36 @@ func (a *Agent) observeBeforeMutation(plan *toolCallPlan) {
 }
 
 // observeAfterMutation records the after fingerprint when a concrete path was
-// known before execution, regardless of tool success or failure.
-func (a *Agent) observeAfterMutation(plan *toolCallPlan) {
-	if a == nil || plan == nil || plan.mutationPath == "" || a.mutationObserver == nil {
+// known before execution, and runs automated verification harness & 3-strike backtrack.
+func (a *Agent) observeAfterMutation(ctx context.Context, plan *toolCallPlan, result *string) {
+	if a == nil || plan == nil {
 		return
 	}
-	toolName := plan.evidenceName
-	if toolName == "" {
-		toolName = plan.call.Name
+	if plan.mutationPath != "" && a.mutationObserver != nil {
+		toolName := plan.evidenceName
+		if toolName == "" {
+			toolName = plan.call.Name
+		}
+		a.mutationObserver.AfterMutation(plan.mutationPath, toolName)
 	}
-	a.mutationObserver.AfterMutation(plan.mutationPath, toolName)
+	if a.verificationHarness != nil && plan.mutates && result != nil {
+		workDir := a.writeWorkspaceRoot
+		if workDir == "" {
+			workDir = "."
+		}
+		verRes := a.verificationHarness.Verify(ctx, workDir)
+		if verRes.Attempted {
+			feedback := verRes.FormatFeedback()
+			if !verRes.Passed && a.backtrackGuard != nil {
+				_, triggered := a.backtrackGuard.RecordFailure(plan.mutationPath)
+				if triggered {
+					_, _ = a.backtrackGuard.Rollback(ctx, workDir, plan.mutationPath)
+					feedback += a.backtrackGuard.FormatBacktrackDirective(plan.mutationPath)
+				}
+			} else if verRes.Passed && a.backtrackGuard != nil {
+				a.backtrackGuard.RecordSuccess(plan.mutationPath)
+			}
+			*result += feedback
+		}
+	}
 }
