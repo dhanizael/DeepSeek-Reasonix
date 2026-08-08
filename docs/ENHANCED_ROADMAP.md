@@ -2,16 +2,85 @@
 
 Fork-local plan for features that live on top of [esengine/DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix).
 
-**Branch baseline:** `main-v2` @ post-upstream sync (`97271ce69`, Aug 2026)  
-**Binary:** `~/.local/bin/reasonix-enhanced` (build from this tree; not the npm `reasonix` package)
+**Binary:** `~/.local/bin/reasonix-enhanced` (build from this tree; not the npm `reasonix` package)  
+**Branch:** `main-v2` (keep synced with `upstream/main-v2`)
 
-## Decision legend
+---
+
+## Mission (north star)
+
+> **reasonix-enhanced** maximizes **prefix-cache hit rate and token efficiency** by keeping the static request prefix stable, while raising **precision, accuracy, and trust** through **host-side validation and verification** — not through longer model chatter.
+
+### Dual pillars (priority order)
+
+| # | Pillar | Meaning |
+|---|--------|---------|
+| **1** | **Cache hit maximal** | Optimal, efficient DeepSeek (and compatible) prefix reuse across long sessions. Stable system / tools / static policy. Enhanced logic lives in **tool results / disk / local process**, not in rewriting the system prefix each turn. |
+| **2** | **Agent quality & intelligence** | Better than vanilla: more precise, accurate, to-the-point, trustworthy, fewer baseless assumptions and hallucinations — **without** trading away pillar 1. |
+
+These are not a forced trade-off when quality comes from **evidence on the host** (syntax checks, scoped tests, checkpoint restore) instead of **more instructions in the prompt**.
+
+### Product formula
+
+```
+vanilla upstream (latest)     = platform: projection, tools, checkpoint, compact
+        +
+reasonix-enhanced             = reliability layer: validate → verify → recover
+        =
+higher cache hit + lower wasted turns + more reliable outcomes
+```
+
+**Not** our goal: a second agent stack, dual undo, dual prefix enforcers, or “smarter” via ever-longer system prompts.
+
+---
+
+## Definition of Done — every enhanced change
+
+A PR or commit that touches enhanced behavior **must** answer yes to the spirit of these gates:
+
+| Gate | Pass if… | Fail if… |
+|------|----------|----------|
+| **G1 Cache** | Does **not** mutate system/tools/static prefix every turn; does not fight upstream projection | Rewrites system message, dual Anchor, dynamic tool schemas for “quality” |
+| **G2 Token thrift** | Extra model-visible text is minimal, capped, or skippable; prefer **silent skip** when safe | Dumps large logs into tool results; forces extra API turns without reducing total tokens/task |
+| **G3 Quality** | Increases **evidence** or **prevents bad writes/loops** (validate / verify / restore) | Makes the model “more confident” without evidence |
+| **G4 Upstream respect** | Composes checkpoint, overlay, compact — no parallel production undo/prefix stack | Second ShadowStore undo path, EnforceAnchor on live path |
+| **G5 Measurable** | Prefer local metrics (`~/.reasonix/enhanced-metrics.jsonl`) or clear behavior tests | “Feels better” only, no test or observable counter |
+
+**Ship rule:** if a feature helps quality but **breaks G1**, redesign it (host-side or suffix-only) or drop it.
+
+### Success metrics (directionally)
+
+**Cache / efficiency**
+
+- Stable prefix across turns; high cache hit on long sessions (UI/status where available)
+- Lower tokens **per completed task** vs vanilla on similar work (fewer repair loops)
+
+**Quality / trust**
+
+- Fewer syntax-invalid writes reaching disk
+- Fewer false “done” states when package tests fail (harness on)
+- Fewer identical failing edit loops (backtrack)
+- Answers more bound to tool evidence than assumption
+
+---
+
+## Feature decision gates (quick filter)
+
+Before building anything enhanced, ask:
+
+1. Does it change system/tools/prefix every turn? → **Reject** (boot-only exceptions only).
+2. Does it add model text without new evidence? → **Reject** or silent/opt-in.
+3. Does it add host evidence (validate, test, restore)? → **Consider**.
+4. Does it force extra API turns? → Only if total tokens/task clearly drop (measure first).
+5. Does it increase confidence without evidence? → **Reject**.
+
+### Decision legend
 
 | Decision | Meaning |
 |----------|---------|
-| **KEEP** | Unique value. Develop further; wire opt-in via config. |
+| **KEEP** | Unique value. Develop further; wire via config when needed. |
 | **MERGE** | Idea is good, but implement **on top of upstream APIs** (don't dual-stack). |
-| **DROP** | Upstream already superior, or prototype too thin. Remove or leave dead code until deleted. |
+| **DROP** | Upstream already superior, or prototype too thin. Quarantine or delete. |
 | **KEEP-POLICY** | Small always-on policy difference (not a subsystem). |
 
 ---
@@ -20,81 +89,79 @@ Fork-local plan for features that live on top of [esengine/DeepSeek-Reasonix](ht
 
 | # | Enhanced feature | Status in binary today | Upstream equivalent | Decision | Why |
 |---|------------------|------------------------|---------------------|----------|-----|
-| 1 | **TUI watchdog stall = 5m** | **Always on** | Default 10s + lifecycle watchdog (grace, phases) | **KEEP-POLICY** | Intentional UX: long idle prompt must not kill the process. Keep 5m + upstream `tuiWatchdogCancelGrace`. Document in fork notes; re-check on each upstream sync. |
-| 2 | **Verification harness** (`internal/harness`) package-scoped post-edit checks | **Live (mode=auto)** for Go workspaces; `go test ./pkg` not `./...` | Goal/delivery **verification evidence** (model must run checks; not host auto-runner) | **KEEP** | Host-side automatic feedback loop, **scoped** to the edited package. Mode `auto|on|off`. |
-| 3 | **3-strike backtrack + file rollback** (`BacktrackGuard`) | **Live with harness**; rollback prefers **checkpoint preimage**, git fallback | `repeatFailureGuard`; full **checkpoint rewind** | **MERGE** | Strikes after harness fail; restore via `PrepareFileRevert`/`CommitFileRevert` when observer store is live. |
-| 4 | **Shadow checkpoints** (`internal/checkpoint/shadow.go`) | **Idle** (setter only; never called) | Production checkpoint + rewind + coverage + barrier | **DROP** (as parallel system) | Upstream is strictly better (preimages, coverage gaps, transactions). Optionally keep a thin **export/debug** helper later; do not wire a second `/undo`. |
-| 5 | **AST Syntax Guard** (`internal/repair/ast_guard.go`) | **Idle** (no tool hook) | Atomic write + `FileOverlay` (safe I/O, not syntax) | **KEEP** | Complementary gap: validate **content** before write. Upstream does not parse Go/JSON for agent writes. Wire into write/edit path **after** overlay content is assembled, **before** atomic commit. Opt-in by language / config. |
-| 6 | **Prefix Anchor Shield** (`internal/compaction/anchor_shield.go`) | **Idle** | Cache-aware **context projection**, `CoveredPrefixHash`, compact pipeline | **DROP** (as enforcer) | Upstream owns prefix stability end-to-end. Re-implementing `EnforceAnchor` risks fighting projection. If needed later: **telemetry-only** “prefix drift detector” using upstream hashes—not a second rewriter. |
+| 1 | **TUI watchdog stall = 5m** | **Always on** | Default ~10s + lifecycle watchdog | **KEEP-POLICY** | Idle prompt must not kill the process. Keep 5m + upstream `tuiWatchdogCancelGrace`. |
+| 2 | **Verification harness** | **Live (mode=auto)** Go workspaces; package-scoped; skip in-flight/cooldown; capped feedback | Goal **verification evidence** (model-run checks) | **KEEP** | Host evidence without full-repo `./...`; token-thrift feedback. |
+| 3 | **3-strike backtrack** | **With harness**; checkpoint preimage then git | `repeatFailureGuard` + checkpoint rewind | **MERGE** | Stop bad loops; restore via upstream store when possible. |
+| 4 | **Shadow checkpoints** | **Quarantined** (deprecated; not on control path) | Production checkpoint + rewind | **DROP** dual-stack | Upstream wins; do not dual `/undo`. |
+| 5 | **AST Syntax Guard** | **Live default-on** on write/edit/multi_edit | Atomic write + FileOverlay | **KEEP** | Content validation before commit; fewer broken-disk turns. |
+| 6 | **Prefix Anchor Shield** | **Quarantined** (deprecated enforcer) | Cache-aware projection / `CoveredPrefixHash` | **DROP** enforcer | Upstream owns prefix; dual rewrite kills cache. |
+| 7 | **Local enhanced metrics** | **Live** counters + `~/.reasonix/enhanced-metrics.jsonl` | Provider telemetry (different purpose) | **KEEP** | Zero API tokens; observe AST/harness/backtrack. |
 
 ---
 
-## Priority order (recommended)
+## Priority order (shipped vs next)
 
 ```
-P0  KEEP-POLICY  Watchdog 5m          — already live; re-verify on every sync
-P1  KEEP         AST Syntax Guard     — highest unique ROI; small surface
-P2  KEEP         Verification harness — opt-in config; timeout + path scoping
-P3  MERGE        Backtrack            — only after harness; rollback via checkpoints
-P4  DROP         ShadowStore          — delete or quarantine; use upstream rewind
-P5  DROP         AnchorShield enforcer— delete or reduce to metrics-only experiment
+DONE  P0  Watchdog 5m
+DONE  P1  AST Syntax Guard (default on)
+DONE  P2  Harness auto + package scope + thrift skips/caps
+DONE  P3  Backtrack with checkpoint-preferring rollback
+DONE  P4  ShadowStore quarantined
+DONE  P5  AnchorShield enforcer quarantined
+DONE  P6  Local metrics (token-free)
+
+NEXT  (only if gates G1–G5 pass)
+      - Silent pass (optional): zero transcript text on harness pass
+      - Tighter package detection / multi-module monorepos
+      - Never: system-prompt quality hacks, dual undo, dual prefix enforcers
 ```
 
 ---
 
-## Target architecture (when fully wired)
+## Target architecture (shipped)
 
 ```
-                    ┌─────────────────────────────────────┐
-                    │  Upstream (always)                  │
-                    │  projection / checkpoint / overlay  │
-                    │  atomic writes / repeatFailureGuard │
-                    │  goal verification evidence         │
-                    └──────────────┬──────────────────────┘
-                                   │
-         ┌─────────────────────────┼─────────────────────────┐
-         │ opt-in enhanced         │                         │
-         ▼                         ▼                         ▼
-   AST pre-write             Host harness              Backtrack policy
-   (write/edit tools)        (after mutates)           (on harness fail)
-         │                         │                         │
-         │                         │              rollback → upstream
-         │                         │              checkpoint/rewind API
-         └─────────────────────────┴─────────────────────────┘
+  ┌──────────────────────────────────────────────────────────┐
+  │  CACHE PATH (prefix-stable)                              │
+  │  Upstream: system prompt, tools, projection, compact     │
+  │  Enhanced: never rewrites this path                      │
+  └────────────────────────────┬─────────────────────────────┘
+                               │
+  ┌────────────────────────────▼─────────────────────────────┐
+  │  QUALITY PATH (host evidence, suffix / disk only)        │
+  │  AST pre-write → scoped harness → backtrack+checkpoint   │
+  │  Metrics: ~/.reasonix/enhanced-metrics.jsonl (local)     │
+  └──────────────────────────────────────────────────────────┘
 ```
 
-**Rules**
+**Rules (non-negotiable)**
 
 1. Never dual-run ShadowStore + upstream checkpoint for user-facing undo.
 2. Never rewrite system/prefix messages outside upstream projection.
-3. Harness default **off** (or off for large monorepos); require explicit config.
-4. AST guard default **on for `.go`/`.json` only** once wired; other langs bracket-check optional.
-5. All enhanced install points go through **one** boot/wire helper + `reasonix.toml` / `~/.reasonix` flags.
+3. Harness **mode=auto** (Go + package scope); use `mode=off` when unwanted — never full-repo by default.
+4. AST guard default **on** for Go/JSON (and light bracket checks for a few other langs).
+5. One boot helper (`applyEnhancedConfig`) + `[enhanced.*]` in config.
+6. Model-visible harness text stays **short / capped / skippable** (token thrift).
 
 ---
 
-## Suggested config sketch (future)
+## Config sketch (current)
 
 ```toml
-# reasonix-enhanced only — not in upstream schema until contributed
-[enhanced]
-# watchdog is compile-time for now (5m); do not expose until needed
+# reasonix-enhanced — see also reasonix.example.toml
 
 [enhanced.ast_guard]
-enabled = true
-languages = ["go", "json"]   # "brackets" for generic
+# enabled = true          # default on when omitted
 
 [enhanced.harness]
-enabled = false              # default off
-timeout = "30s"
-# command = ""               # empty = auto-detect
-max_output_bytes = 4096
-scope = "package"            # future: package | workspace (avoid go test ./... always)
+# mode = "auto"           # auto|on|off — auto when go.mod present
+# scope = "package"       # package|workspace
+# command = ""            # optional override
+# timeout_seconds = 45
 
 [enhanced.backtrack]
-enabled = false
-max_strikes = 3
-# rollback_backend = "checkpoint"  # never "git_shadow" once MERGE done
+# enabled follows harness when omitted
+# max_strikes = 3
 ```
 
 ---
