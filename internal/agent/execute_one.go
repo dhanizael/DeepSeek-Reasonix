@@ -921,7 +921,8 @@ func (a *Agent) observeAfterMutation(ctx context.Context, plan *toolCallPlan, re
 			workDir = "."
 		}
 		// Package-scoped verify when mutation path is known (avoids go test ./... storms).
-		// Skipped runs (in-flight / pass cooldown) add no transcript text (token thrift).
+		// Skipped runs and silent passes add no transcript text (token thrift).
+		// Failures still append capped feedback; backtrack still records success/fail.
 		verRes := a.verificationHarness.VerifyPath(ctx, workDir, plan.mutationPath)
 		if verRes.Attempted {
 			feedback := verRes.FormatFeedback()

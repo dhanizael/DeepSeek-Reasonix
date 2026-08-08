@@ -19,6 +19,7 @@ command = "echo ok"
 timeout_seconds = 15
 scope = "package"
 max_output_bytes = 2048
+silent_pass = false
 
 [enhanced.backtrack]
 enabled = true
@@ -40,6 +41,9 @@ max_strikes = 4
 	if cfg.HarnessScope() != "package" {
 		t.Fatalf("scope = %q", cfg.HarnessScope())
 	}
+	if cfg.HarnessSilentPass() {
+		t.Fatal("silent_pass=false should disable silent pass")
+	}
 	if !cfg.BacktrackEnabled(true) || cfg.Enhanced.Backtrack.MaxStrikes != 4 {
 		t.Fatalf("backtrack = %+v", cfg.Enhanced.Backtrack)
 	}
@@ -55,6 +59,9 @@ func TestEnhancedDefaultsAuto(t *testing.T) {
 	}
 	if cfg.HarnessScope() != "package" {
 		t.Fatalf("default scope = %q", cfg.HarnessScope())
+	}
+	if !cfg.HarnessSilentPass() {
+		t.Fatal("default silent_pass should be true (token thrift)")
 	}
 	// follow harness when backtrack.Enabled nil
 	if !cfg.BacktrackEnabled(true) || cfg.BacktrackEnabled(false) {

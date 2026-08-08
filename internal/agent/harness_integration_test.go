@@ -9,10 +9,10 @@ import (
 	"reasonix/internal/harness"
 )
 
-func TestAgentVerificationHarnessIntegration(t *testing.T) {
+func TestAgentVerificationHarnessIntegrationSilentPass(t *testing.T) {
 	tempDir := t.TempDir()
 
-	// Create passing verification config
+	// Default SilentPass=true: pass must not grow the tool-result transcript.
 	cfg := harness.DefaultConfig()
 	cfg.CustomCommand = "echo 'test execution passed'"
 	h := harness.NewHarness(cfg)
@@ -32,8 +32,37 @@ func TestAgentVerificationHarnessIntegration(t *testing.T) {
 	result := "initial result"
 	a.observeAfterMutation(context.Background(), dummyPlan, &result)
 
+	if result != "initial result" {
+		t.Fatalf("silent pass must leave tool result unchanged, got %q", result)
+	}
+	if strings.Contains(result, "Verification Harness") {
+		t.Fatalf("silent pass leaked harness text: %q", result)
+	}
+}
+
+func TestAgentVerificationHarnessIntegrationVerbosePass(t *testing.T) {
+	tempDir := t.TempDir()
+
+	cfg := harness.DefaultConfig()
+	cfg.CustomCommand = "echo 'test execution passed'"
+	cfg.SilentPass = false
+	h := harness.NewHarness(cfg)
+
+	a := &Agent{
+		writeWorkspaceRoot: tempDir,
+	}
+	a.SetVerificationHarness(h)
+
+	dummyPlan := &toolCallPlan{
+		mutates:      true,
+		mutationPath: filepath.Join(tempDir, "main.go"),
+	}
+
+	result := "initial result"
+	a.observeAfterMutation(context.Background(), dummyPlan, &result)
+
 	if !strings.Contains(result, "✅ passed") {
-		t.Fatalf("expected feedback to contain auto-check pass, got %q", result)
+		t.Fatalf("silent_pass=false should append pass notice, got %q", result)
 	}
 }
 

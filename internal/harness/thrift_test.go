@@ -78,14 +78,54 @@ func TestInFlightSkipsParallelSameCommand(t *testing.T) {
 	}
 }
 
-func TestFormatFeedbackShortPass(t *testing.T) {
-	r := Result{Attempted: true, Passed: true, Command: "go test ./pkg", Duration: time.Millisecond, Scope: ScopePackage}
+func TestFormatFeedbackSilentPassDefault(t *testing.T) {
+	r := Result{
+		Attempted:  true,
+		Passed:     true,
+		Command:    "go test ./pkg",
+		Duration:   time.Millisecond,
+		Scope:      ScopePackage,
+		SilentPass: true,
+	}
+	if fb := r.FormatFeedback(); fb != "" {
+		t.Fatalf("silent pass must be empty, got %q", fb)
+	}
+}
+
+func TestFormatFeedbackShortPassVerbose(t *testing.T) {
+	r := Result{
+		Attempted:  true,
+		Passed:     true,
+		Command:    "go test ./pkg",
+		Duration:   time.Millisecond,
+		Scope:      ScopePackage,
+		SilentPass: false,
+	}
 	fb := r.FormatFeedback()
+	if fb == "" || !strings.Contains(fb, "✅ passed") {
+		t.Fatalf("verbose pass should emit notice: %q", fb)
+	}
 	if strings.Count(fb, "\n") > 3 {
 		t.Fatalf("pass feedback should be minimal lines: %q", fb)
 	}
 	if len(fb) > 200 {
 		t.Fatalf("pass feedback too long for token thrift: %d", len(fb))
+	}
+}
+
+func TestSilentPassRecordsMetric(t *testing.T) {
+	enhancedmetrics.Reset()
+	cfg := DefaultConfig()
+	cfg.CustomCommand = "echo ok"
+	cfg.PassCooldown = -1
+	h := NewHarness(cfg)
+	r := h.Verify(context.Background(), t.TempDir())
+	if !r.Passed || r.FormatFeedback() != "" {
+		t.Fatalf("want silent pass: %+v feedback=%q", r, r.FormatFeedback())
+	}
+	snap := enhancedmetrics.Snapshot()
+	if snap.HarnessPassed < 1 || snap.HarnessSilentPass < 1 {
+		t.Fatalf("metrics = %+v", snap)
 	}
 }
 

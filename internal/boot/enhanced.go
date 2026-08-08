@@ -37,6 +37,7 @@ func applyEnhancedConfig(cfg *config.Config, executor *agent.Agent, workspaceRoo
 		hcfg.Enabled = true
 		hcfg.CustomCommand = cfg.Enhanced.Harness.Command
 		hcfg.Scope = cfg.HarnessScope()
+		hcfg.SilentPass = cfg.HarnessSilentPass()
 		if cfg.Enhanced.Harness.TimeoutSeconds > 0 {
 			hcfg.Timeout = time.Duration(cfg.Enhanced.Harness.TimeoutSeconds) * time.Second
 		}

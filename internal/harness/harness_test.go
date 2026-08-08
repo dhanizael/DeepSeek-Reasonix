@@ -51,6 +51,7 @@ func TestDetector(t *testing.T) {
 func TestHarnessVerifyPassingCommand(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.CustomCommand = "echo 'all tests passed'"
+	// Default SilentPass=true: success notice stays out of the transcript.
 
 	h := NewHarness(cfg)
 	res := h.Verify(context.Background(), t.TempDir())
@@ -64,10 +65,27 @@ func TestHarnessVerifyPassingCommand(t *testing.T) {
 	if !strings.Contains(res.Output, "all tests passed") {
 		t.Fatalf("unexpected output: %s", res.Output)
 	}
+	if !res.SilentPass {
+		t.Fatal("default SilentPass should be true")
+	}
+	if fb := res.FormatFeedback(); fb != "" {
+		t.Fatalf("silent pass must inject zero transcript text, got %q", fb)
+	}
+}
 
+func TestHarnessVerifyPassingCommandVerbose(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.CustomCommand = "echo 'all tests passed'"
+	cfg.SilentPass = false
+
+	h := NewHarness(cfg)
+	res := h.Verify(context.Background(), t.TempDir())
+	if !res.Passed {
+		t.Fatalf("expected pass: %+v", res)
+	}
 	feedback := res.FormatFeedback()
 	if !strings.Contains(feedback, "✅ passed") {
-		t.Fatalf("unexpected feedback format: %s", feedback)
+		t.Fatalf("verbose silent_pass=false should emit notice: %s", feedback)
 	}
 }
 

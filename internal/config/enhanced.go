@@ -29,6 +29,10 @@ type EnhancedASTGuardConfig struct {
 //   - "off": never enable
 //
 // Legacy Enabled=true forces "on". Empty Mode with Enabled=false yields "auto".
+//
+// SilentPass (nil/default true): on harness pass, inject no tool-result text
+// into the model transcript (token thrift). Failures always emit capped feedback.
+// Set silent_pass = false to restore the one-line ✅ notice.
 type EnhancedHarnessConfig struct {
 	Enabled        bool   `toml:"enabled"`
 	Mode           string `toml:"mode"` // auto|on|off
@@ -37,6 +41,8 @@ type EnhancedHarnessConfig struct {
 	MaxOutputBytes int    `toml:"max_output_bytes"`
 	// Scope: package (default) | workspace
 	Scope string `toml:"scope"`
+	// SilentPass: nil or true = suppress pass notices; false = one-line notice.
+	SilentPass *bool `toml:"silent_pass"`
 }
 
 // EnhancedBacktrackConfig controls the 3-strike policy after harness failures.
@@ -106,6 +112,15 @@ func (c *Config) HarnessScope() string {
 	default:
 		return "package"
 	}
+}
+
+// HarnessSilentPass reports whether pass notices are omitted from tool results.
+// Default true (token thrift). Explicit silent_pass = false restores the notice.
+func (c *Config) HarnessSilentPass() bool {
+	if c == nil || c.Enhanced.Harness.SilentPass == nil {
+		return true
+	}
+	return *c.Enhanced.Harness.SilentPass
 }
 
 // BacktrackEnabled reports whether backtrack installs given harnessActive.

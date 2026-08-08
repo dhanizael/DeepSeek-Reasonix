@@ -90,7 +90,7 @@ Before building anything enhanced, ask:
 | # | Enhanced feature | Status in binary today | Upstream equivalent | Decision | Why |
 |---|------------------|------------------------|---------------------|----------|-----|
 | 1 | **TUI watchdog stall = 5m** | **Always on** | Default ~10s + lifecycle watchdog | **KEEP-POLICY** | Idle prompt must not kill the process. Keep 5m + upstream `tuiWatchdogCancelGrace`. |
-| 2 | **Verification harness** | **Live (mode=auto)** Go workspaces; package-scoped; skip in-flight/cooldown; capped feedback | Goal **verification evidence** (model-run checks) | **KEEP** | Host evidence without full-repo `./...`; token-thrift feedback. |
+| 2 | **Verification harness** | **Live (mode=auto)** Go workspaces; package-scoped; skip in-flight/cooldown; **silent pass** (default); capped fail feedback | Goal **verification evidence** (model-run checks) | **KEEP** | Host evidence without full-repo `./...`; token-thrift feedback. |
 | 3 | **3-strike backtrack** | **With harness**; checkpoint preimage then git | `repeatFailureGuard` + checkpoint rewind | **MERGE** | Stop bad loops; restore via upstream store when possible. |
 | 4 | **Shadow checkpoints** | **Quarantined** (deprecated; not on control path) | Production checkpoint + rewind | **DROP** dual-stack | Upstream wins; do not dual `/undo`. |
 | 5 | **AST Syntax Guard** | **Live default-on** on write/edit/multi_edit | Atomic write + FileOverlay | **KEEP** | Content validation before commit; fewer broken-disk turns. |
@@ -109,10 +109,12 @@ DONE  P3  Backtrack with checkpoint-preferring rollback
 DONE  P4  ShadowStore quarantined
 DONE  P5  AnchorShield enforcer quarantined
 DONE  P6  Local metrics (token-free)
+DONE  P7  Silent pass (default): zero tool-result text on harness pass;
+         metrics harness_silent_pass; opt-out via silent_pass=false
 
 NEXT  (only if gates G1–G5 pass)
-      - Silent pass (optional): zero transcript text on harness pass
       - Tighter package detection / multi-module monorepos
+      - Budget gate (max harness runs / repairs per task) if measured need
       - Never: system-prompt quality hacks, dual undo, dual prefix enforcers
 ```
 
@@ -158,6 +160,7 @@ NEXT  (only if gates G1–G5 pass)
 # scope = "package"       # package|workspace
 # command = ""            # optional override
 # timeout_seconds = 45
+# silent_pass = true      # default: no model-visible text on pass
 
 [enhanced.backtrack]
 # enabled follows harness when omitted

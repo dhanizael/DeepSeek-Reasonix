@@ -97,8 +97,34 @@ func TestApplyEnhancedConfigModeOnWithCustomCommand(t *testing.T) {
 	if !res.Attempted || !res.Passed {
 		t.Fatalf("custom command should pass: %+v", res)
 	}
+	// Default silent_pass: zero model-visible text on pass.
+	if res.FormatFeedback() != "" {
+		t.Fatalf("default silent pass feedback = %q want empty", res.FormatFeedback())
+	}
+}
+
+func TestApplyEnhancedConfigSilentPassFalse(t *testing.T) {
+	t.Cleanup(func() { builtin.SetASTSyntaxGuardEnabled(true) })
+
+	verbose := false
+	cfg := config.Default()
+	cfg.Enhanced.Harness.Mode = "on"
+	cfg.Enhanced.Harness.Command = "echo harness-ok"
+	cfg.Enhanced.Harness.SilentPass = &verbose
+	off := false
+	cfg.Enhanced.Backtrack.Enabled = &off
+
+	a := agent.New(nil, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{
+		WriteWorkspaceRoot: t.TempDir(),
+	}, event.Discard)
+	applyEnhancedConfig(cfg, a, t.TempDir())
+
+	res := a.VerificationHarness().Verify(context.Background(), t.TempDir())
+	if !res.Passed {
+		t.Fatalf("want pass: %+v", res)
+	}
 	if !strings.Contains(res.FormatFeedback(), "✅ passed") {
-		t.Fatalf("feedback = %q", res.FormatFeedback())
+		t.Fatalf("silent_pass=false feedback = %q", res.FormatFeedback())
 	}
 }
 

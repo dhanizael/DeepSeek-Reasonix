@@ -19,6 +19,7 @@ type Counters struct {
 	HarnessPassed      uint64 `json:"harness_passed"`
 	HarnessFailed      uint64 `json:"harness_failed"`
 	HarnessSkipped     uint64 `json:"harness_skipped"`
+	HarnessSilentPass  uint64 `json:"harness_silent_pass"` // pass with zero model-visible text
 	BacktrackTriggered uint64 `json:"backtrack_triggered"`
 }
 
@@ -28,6 +29,7 @@ var (
 	harnessPassed      atomic.Uint64
 	harnessFailed      atomic.Uint64
 	harnessSkipped     atomic.Uint64
+	harnessSilentPass  atomic.Uint64
 	backtrackTriggered atomic.Uint64
 
 	persistMu   sync.Mutex
@@ -50,6 +52,7 @@ func Snapshot() Counters {
 		HarnessPassed:      harnessPassed.Load(),
 		HarnessFailed:      harnessFailed.Load(),
 		HarnessSkipped:     harnessSkipped.Load(),
+		HarnessSilentPass:  harnessSilentPass.Load(),
 		BacktrackTriggered: backtrackTriggered.Load(),
 	}
 }
@@ -61,6 +64,7 @@ func Reset() {
 	harnessPassed.Store(0)
 	harnessFailed.Store(0)
 	harnessSkipped.Store(0)
+	harnessSilentPass.Store(0)
 	backtrackTriggered.Store(0)
 }
 
@@ -90,6 +94,13 @@ func RecordHarnessAttempt(passed bool, command, scope string, durationMS int64) 
 func RecordHarnessSkip(reason, command string) {
 	harnessSkipped.Add(1)
 	persist("harness_skip", map[string]any{"reason": reason, "command": command})
+}
+
+// RecordHarnessSilentPass records a pass whose FormatFeedback was empty
+// (silent_pass thrift — zero tool-result tokens for the model).
+func RecordHarnessSilentPass(command string) {
+	harnessSilentPass.Add(1)
+	persist("harness_silent_pass", map[string]any{"command": command})
 }
 
 // RecordBacktrack increments 3-strike triggers.

@@ -263,7 +263,10 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # reasonix-enhanced fork knobs (ignored by upstream builds without this struct field).
 # AST defaults on. Harness mode=auto runs package-scoped checks when go.mod exists
 # (e.g. go test ./internal/foo after editing that package — not full ./...).
-# Backtrack follows harness and prefers session checkpoint preimage, then git.
+# silent_pass=true (default): harness success injects zero tool-result text
+# (token thrift; still recorded in ~/.reasonix/enhanced-metrics.jsonl).
+# Failures always emit capped, actionable feedback. Set silent_pass=false for
+# the one-line ✅ notice. Backtrack follows harness and prefers checkpoint restore.
 [enhanced.ast_guard]
 # enabled = true
 
@@ -272,6 +275,8 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # scope = "package"       # package|workspace
 # command = ""            # optional override
 # timeout_seconds = 45
+# max_output_bytes = 2048 # fail-output cap into tool results (ceiling 4096)
+# silent_pass = true      # default true; false restores one-line pass notice
 # enabled = false         # legacy; empty mode + false => auto
 
 [enhanced.backtrack]

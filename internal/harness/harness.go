@@ -43,6 +43,9 @@ type Result struct {
 	Duration   time.Duration
 	Err        error
 	Scope      string // package|workspace|custom
+	// SilentPass is copied from Config at verify time. When true and Passed,
+	// FormatFeedback returns empty (zero model-visible tokens on success).
+	SilentPass bool
 }
 
 // Config controls verification harness execution behavior.
@@ -56,10 +59,13 @@ type Config struct {
 	// PassCooldown skips re-running the same command after a recent pass.
 	// 0 uses DefaultPassCooldown; negative disables cooldown.
 	PassCooldown time.Duration `json:"pass_cooldown,omitempty"`
+	// SilentPass omits pass notices from FormatFeedback (token thrift).
+	// Failures always emit capped feedback. Default true.
+	SilentPass bool `json:"silent_pass"`
 }
 
 // DefaultConfig returns defaults tuned for reasonix-enhanced: package-scoped
-// checks, tight output cap (token thrift), hard timeout.
+// checks, tight output cap (token thrift), hard timeout, silent pass.
 func DefaultConfig() Config {
 	return Config{
 		Enabled:        true,
@@ -67,6 +73,7 @@ func DefaultConfig() Config {
 		MaxOutputBytes: DefaultMaxOutputBytes,
 		Scope:          ScopePackage,
 		PassCooldown:   DefaultPassCooldown,
+		SilentPass:     true,
 	}
 }
 
@@ -263,11 +270,12 @@ func (h *Harness) VerifyPath(ctx context.Context, workDir, mutationPath string) 
 	duration := time.Since(startTime)
 
 	res := Result{
-		Attempted: true,
-		Command:   cmdStr,
-		Duration:  duration,
-		Output:    truncateOutput(string(out), h.config.MaxOutputBytes),
-		Scope:     usedScope,
+		Attempted:  true,
+		Command:    cmdStr,
+		Duration:   duration,
+		Output:     truncateOutput(string(out), h.config.MaxOutputBytes),
+		Scope:      usedScope,
+		SilentPass: h.config.SilentPass,
 	}
 
 	if err == nil {
@@ -285,6 +293,10 @@ func (h *Harness) VerifyPath(ctx context.Context, workDir, mutationPath string) 
 	}
 
 	enhancedmetrics.RecordHarnessAttempt(res.Passed, cmdStr, usedScope, duration.Milliseconds())
+	if res.Passed && res.SilentPass {
+		// Local-only: success produced zero tool-result text for the model.
+		enhancedmetrics.RecordHarnessSilentPass(cmdStr)
+	}
 	return res
 }
 
@@ -319,7 +331,8 @@ func (h *Harness) notePass(key string) {
 }
 
 // FormatFeedback produces a short markdown notice for the model.
-// Skipped runs return empty string (zero transcript tokens).
+// Skipped runs and silent passes return empty string (zero transcript tokens).
+// Failures always return capped, actionable feedback.
 func (r Result) FormatFeedback() string {
 	if r.Skipped || !r.Attempted {
 		return ""
@@ -331,7 +344,12 @@ func (r Result) FormatFeedback() string {
 	}
 
 	if r.Passed {
-		// One line only — enough for the model, minimal tokens.
+		if r.SilentPass {
+			// Token thrift: host already verified; do not spend model context
+			// on a success notice. Metrics still record the pass locally.
+			return ""
+		}
+		// One line only — opt-in verbose mode (silent_pass=false).
 		return fmt.Sprintf("\n[Verification Harness]%s ✅ passed (`%s`, %v)\n",
 			scopeNote, r.Command, r.Duration.Round(time.Millisecond))
 	}
