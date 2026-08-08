@@ -66,7 +66,7 @@ func TestHarnessVerifyPassingCommand(t *testing.T) {
 	}
 
 	feedback := res.FormatFeedback()
-	if !strings.Contains(feedback, "✅ Auto-check passed") {
+	if !strings.Contains(feedback, "✅ passed") {
 		t.Fatalf("unexpected feedback format: %s", feedback)
 	}
 }
@@ -90,7 +90,7 @@ func TestHarnessVerifyFailingCommand(t *testing.T) {
 	}
 
 	feedback := res.FormatFeedback()
-	if !strings.Contains(feedback, "❌ Auto-check failed") {
+	if !strings.Contains(feedback, "❌ failed") {
 		t.Fatalf("unexpected feedback format: %s", feedback)
 	}
 	if !strings.Contains(feedback, "error: syntax error in main.go") {

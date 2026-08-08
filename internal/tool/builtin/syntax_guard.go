@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"reasonix/internal/enhancedmetrics"
 	"reasonix/internal/repair"
 )
 
@@ -38,6 +39,7 @@ func rejectInvalidSyntax(path, content string) error {
 	if ok {
 		return nil
 	}
+	enhancedmetrics.RecordASTReject(path)
 	if detail == "" {
 		return fmt.Errorf("syntax validation rejected write to %s", path)
 	}

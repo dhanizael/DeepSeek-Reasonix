@@ -7,7 +7,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"reasonix/internal/enhancedmetrics"
 )
 
 // Scope controls how broad verification runs when a mutation path is known.
@@ -19,16 +22,27 @@ const (
 	ScopeWorkspace = "workspace"
 )
 
+// DefaultMaxOutputBytes caps harness stdout embedded into tool results (model
+// context). Keep small for token thrift; full logs stay local in the process.
+const DefaultMaxOutputBytes = 2048
+
+// DefaultPassCooldown is how long to skip re-running the same command after a pass.
+// Bursts of multi_edit / chained writes in one package should not re-tax CPU
+// or re-append identical pass notices into the transcript.
+const DefaultPassCooldown = 3 * time.Second
+
 // Result represents the outcome of an automated verification run.
 type Result struct {
-	Attempted bool
-	Command   string
-	Passed    bool
-	ExitCode  int
-	Output    string
-	Duration  time.Duration
-	Err       error
-	Scope     string // package|workspace|custom
+	Attempted  bool
+	Skipped    bool
+	SkipReason string
+	Command    string
+	Passed     bool
+	ExitCode   int
+	Output     string
+	Duration   time.Duration
+	Err        error
+	Scope      string // package|workspace|custom
 }
 
 // Config controls verification harness execution behavior.
@@ -39,16 +53,20 @@ type Config struct {
 	MaxOutputBytes int           `json:"max_output_bytes"`
 	// Scope is "package" (default) or "workspace". Ignored when CustomCommand is set.
 	Scope string `json:"scope,omitempty"`
+	// PassCooldown skips re-running the same command after a recent pass.
+	// 0 uses DefaultPassCooldown; negative disables cooldown.
+	PassCooldown time.Duration `json:"pass_cooldown,omitempty"`
 }
 
 // DefaultConfig returns defaults tuned for reasonix-enhanced: package-scoped
-// checks with a hard timeout so post-edit verify never freezes a turn.
+// checks, tight output cap (token thrift), hard timeout.
 func DefaultConfig() Config {
 	return Config{
 		Enabled:        true,
 		Timeout:        45 * time.Second,
-		MaxOutputBytes: 8192,
+		MaxOutputBytes: DefaultMaxOutputBytes,
 		Scope:          ScopePackage,
+		PassCooldown:   DefaultPassCooldown,
 	}
 }
 
@@ -116,16 +134,13 @@ func (d *Detector) DetectScopedCommand(workDir, mutationPath string) (cmd string
 	}
 	absMut = filepath.Clean(absMut)
 
-	// Prefer Go package scope when a module is found above the file.
 	if _, pkgRel, found := goPackageForFile(absMut); found {
 		if pkgRel == "" || pkgRel == "." {
 			return "go test .", ScopePackage, true
 		}
-		// go test ./path/to/pkg — never full ./... for a single-file edit
 		return "go test ./" + filepath.ToSlash(pkgRel), ScopePackage, true
 	}
 
-	// Node: nearest package.json directory — run package test script there via -C
 	if pkgDir, found := findUp(absMut, "package.json"); found {
 		var runner string
 		if fileExists(filepath.Join(pkgDir, "pnpm-lock.yaml")) {
@@ -135,11 +150,9 @@ func (d *Detector) DetectScopedCommand(workDir, mutationPath string) (cmd string
 		} else {
 			runner = "npm test"
 		}
-		// Run in package dir; shell-escape via single-quoted path
 		return fmt.Sprintf("cd %s && %s", shellSingleQuote(pkgDir), runner), ScopePackage, true
 	}
 
-	// Rust: crate root with Cargo.toml
 	if crateDir, found := findUp(absMut, "Cargo.toml"); found {
 		return fmt.Sprintf("cd %s && cargo test", shellSingleQuote(crateDir)), ScopePackage, true
 	}
@@ -152,6 +165,11 @@ func (d *Detector) DetectScopedCommand(workDir, mutationPath string) (cmd string
 type Harness struct {
 	config   Config
 	detector *Detector
+
+	mu        sync.Mutex
+	inFlight  map[string]struct{} // key: workDir\x00cmd
+	lastPass  map[string]time.Time
+	passCD    time.Duration
 }
 
 // NewHarness constructs a verification harness.
@@ -160,12 +178,23 @@ func NewHarness(cfg Config) *Harness {
 		cfg.Timeout = 45 * time.Second
 	}
 	if cfg.MaxOutputBytes <= 0 {
-		cfg.MaxOutputBytes = 8192
+		cfg.MaxOutputBytes = DefaultMaxOutputBytes
+	}
+	if cfg.MaxOutputBytes > 4096 {
+		// Hard ceiling so config cannot dump huge logs into model context.
+		cfg.MaxOutputBytes = 4096
 	}
 	cfg.Scope = normalizeScope(cfg.Scope)
+	cd := cfg.PassCooldown
+	if cd == 0 {
+		cd = DefaultPassCooldown
+	}
 	return &Harness{
 		config:   cfg,
 		detector: NewDetector(),
+		inFlight: make(map[string]struct{}),
+		lastPass: make(map[string]time.Time),
+		passCD:   cd,
 	}
 }
 
@@ -176,6 +205,9 @@ func (h *Harness) Verify(ctx context.Context, workDir string) Result {
 
 // VerifyPath runs verification scoped to mutationPath when Config.Scope is
 // package (default). CustomCommand always wins and runs at workDir.
+//
+// Token thrift: skips when the same command is already running, or passed
+// within PassCooldown (no extra tool-result text, local metric only).
 func (h *Harness) VerifyPath(ctx context.Context, workDir, mutationPath string) Result {
 	if h == nil || !h.config.Enabled {
 		return Result{Attempted: false}
@@ -206,6 +238,20 @@ func (h *Harness) VerifyPath(ctx context.Context, workDir, mutationPath string) 
 		usedScope = sc
 	}
 
+	key := workDir + "\x00" + cmdStr
+
+	if skip, reason := h.beginRun(key); skip {
+		enhancedmetrics.RecordHarnessSkip(reason, cmdStr)
+		return Result{
+			Attempted:  false,
+			Skipped:    true,
+			SkipReason: reason,
+			Command:    cmdStr,
+			Scope:      usedScope,
+		}
+	}
+	defer h.endRun(key)
+
 	ctx, cancel := context.WithTimeout(ctx, h.config.Timeout)
 	defer cancel()
 
@@ -227,6 +273,7 @@ func (h *Harness) VerifyPath(ctx context.Context, workDir, mutationPath string) 
 	if err == nil {
 		res.Passed = true
 		res.ExitCode = 0
+		h.notePass(key)
 	} else {
 		res.Passed = false
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -237,12 +284,44 @@ func (h *Harness) VerifyPath(ctx context.Context, workDir, mutationPath string) 
 		res.Err = err
 	}
 
+	enhancedmetrics.RecordHarnessAttempt(res.Passed, cmdStr, usedScope, duration.Milliseconds())
 	return res
 }
 
-// FormatFeedback produces a clean markdown notice for the model.
+func (h *Harness) beginRun(key string) (skip bool, reason string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, busy := h.inFlight[key]; busy {
+		return true, "already_running"
+	}
+	if h.passCD > 0 {
+		if t, ok := h.lastPass[key]; ok && time.Since(t) < h.passCD {
+			return true, "pass_cooldown"
+		}
+	}
+	h.inFlight[key] = struct{}{}
+	return false, ""
+}
+
+func (h *Harness) endRun(key string) {
+	h.mu.Lock()
+	delete(h.inFlight, key)
+	h.mu.Unlock()
+}
+
+func (h *Harness) notePass(key string) {
+	if h.passCD < 0 {
+		return
+	}
+	h.mu.Lock()
+	h.lastPass[key] = time.Now()
+	h.mu.Unlock()
+}
+
+// FormatFeedback produces a short markdown notice for the model.
+// Skipped runs return empty string (zero transcript tokens).
 func (r Result) FormatFeedback() string {
-	if !r.Attempted {
+	if r.Skipped || !r.Attempted {
 		return ""
 	}
 
@@ -252,18 +331,22 @@ func (r Result) FormatFeedback() string {
 	}
 
 	if r.Passed {
-		return fmt.Sprintf("\n[Verification Harness]%s ✅ Auto-check passed (`%s` completed in %v)\n",
+		// One line only — enough for the model, minimal tokens.
+		return fmt.Sprintf("\n[Verification Harness]%s ✅ passed (`%s`, %v)\n",
 			scopeNote, r.Command, r.Duration.Round(time.Millisecond))
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("\n[Verification Harness]%s ❌ Auto-check failed (`%s` exited with code %d in %v):\n",
+	sb.WriteString(fmt.Sprintf("\n[Verification Harness]%s ❌ failed (`%s`, code %d, %v):\n",
 		scopeNote, r.Command, r.ExitCode, r.Duration.Round(time.Millisecond)))
-	sb.WriteString("```\n")
-	sb.WriteString(strings.TrimSpace(r.Output))
-	sb.WriteString("\n```\n")
-	sb.WriteString("⚠️ Please inspect the verification failure output above and fix the issue in your next step.\n")
-
+	// Prefer tail of failure output (errors usually last); already byte-capped.
+	out := strings.TrimSpace(r.Output)
+	if out != "" {
+		sb.WriteString("```\n")
+		sb.WriteString(out)
+		sb.WriteString("\n```\n")
+	}
+	sb.WriteString("Fix the failure above; do not repeat the same broken patch.\n")
 	return sb.String()
 }
 
@@ -276,7 +359,6 @@ func normalizeScope(s string) string {
 	}
 }
 
-// goPackageForFile finds the Go module root and package path relative to it for a file.
 func goPackageForFile(absFile string) (modRoot, pkgRel string, ok bool) {
 	dir := absFile
 	if info, err := os.Stat(absFile); err == nil && !info.IsDir() {
@@ -327,12 +409,17 @@ func fileExists(path string) bool {
 }
 
 func truncateOutput(out string, maxBytes int) string {
-	if len(out) <= maxBytes {
+	if maxBytes <= 0 || len(out) <= maxBytes {
 		return out
 	}
-	half := (maxBytes - 100) / 2
-	if half < 1 {
-		return out[:maxBytes]
+	// Keep the tail: test failures usually print the assertion last.
+	if maxBytes < 80 {
+		return out[len(out)-maxBytes:]
 	}
-	return out[:half] + "\n\n... [Verification output truncated] ...\n\n" + out[len(out)-half:]
+	head := maxBytes / 4
+	tail := maxBytes - head - 40
+	if tail < 1 {
+		return out[len(out)-maxBytes:]
+	}
+	return out[:head] + "\n\n... [truncated for token thrift] ...\n\n" + out[len(out)-tail:]
 }

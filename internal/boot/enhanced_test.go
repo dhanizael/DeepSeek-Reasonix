@@ -97,7 +97,7 @@ func TestApplyEnhancedConfigModeOnWithCustomCommand(t *testing.T) {
 	if !res.Attempted || !res.Passed {
 		t.Fatalf("custom command should pass: %+v", res)
 	}
-	if !strings.Contains(res.FormatFeedback(), "Auto-check passed") {
+	if !strings.Contains(res.FormatFeedback(), "✅ passed") {
 		t.Fatalf("feedback = %q", res.FormatFeedback())
 	}
 }

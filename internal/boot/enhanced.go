@@ -1,10 +1,12 @@
 package boot
 
 import (
+	"path/filepath"
 	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
+	"reasonix/internal/enhancedmetrics"
 	"reasonix/internal/harness"
 	"reasonix/internal/tool/builtin"
 )
@@ -15,6 +17,11 @@ import (
 // Agent.SetBacktrackGuard / SetMutationObserver rebind checkpoint-preferring
 // rollback once the observer is live.
 func applyEnhancedConfig(cfg *config.Config, executor *agent.Agent, workspaceRoot string) {
+	// Local-only JSONL metrics (never sent to providers).
+	if home := config.ReasonixHomeDir(); home != "" {
+		enhancedmetrics.SetPersistPath(filepath.Join(home, "enhanced-metrics.jsonl"))
+	}
+
 	if cfg == nil {
 		builtin.SetASTSyntaxGuardEnabled(true)
 		return

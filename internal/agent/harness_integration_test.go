@@ -32,7 +32,7 @@ func TestAgentVerificationHarnessIntegration(t *testing.T) {
 	result := "initial result"
 	a.observeAfterMutation(context.Background(), dummyPlan, &result)
 
-	if !strings.Contains(result, "✅ Auto-check passed") {
+	if !strings.Contains(result, "✅ passed") {
 		t.Fatalf("expected feedback to contain auto-check pass, got %q", result)
 	}
 }

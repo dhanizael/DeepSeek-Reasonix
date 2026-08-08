@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"reasonix/internal/checkpoint"
+	"reasonix/internal/enhancedmetrics"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/instruction"
@@ -920,16 +921,20 @@ func (a *Agent) observeAfterMutation(ctx context.Context, plan *toolCallPlan, re
 			workDir = "."
 		}
 		// Package-scoped verify when mutation path is known (avoids go test ./... storms).
+		// Skipped runs (in-flight / pass cooldown) add no transcript text (token thrift).
 		verRes := a.verificationHarness.VerifyPath(ctx, workDir, plan.mutationPath)
 		if verRes.Attempted {
 			feedback := verRes.FormatFeedback()
 			if !verRes.Passed && a.backtrackGuard != nil {
 				_, triggered := a.backtrackGuard.RecordFailure(plan.mutationPath)
 				if triggered {
+					enhancedmetrics.RecordBacktrack(plan.mutationPath)
 					if detail, err := a.backtrackGuard.Rollback(ctx, workDir, plan.mutationPath); err == nil && detail != "" {
-						feedback += "\n[Backtrack] " + detail + "\n"
+						// One short line only — restore detail is for local ops, not a log dump.
+						feedback += "\n[Backtrack] restored\n"
+						_ = detail
 					} else if err != nil {
-						feedback += "\n[Backtrack] auto-restore failed (" + err.Error() + "); discard the failed approach.\n"
+						feedback += "\n[Backtrack] restore failed; change approach.\n"
 					}
 					feedback += a.backtrackGuard.FormatBacktrackDirective(plan.mutationPath)
 				}
