@@ -83,6 +83,7 @@ func (c *Config) HarnessMode() string {
 }
 
 // HarnessEnabledForRoot reports whether the host harness should install for workspaceRoot.
+// Auto mode: root go.mod, go.work, or a depth-1 nested go.mod (multi-module monorepo).
 func (c *Config) HarnessEnabledForRoot(workspaceRoot string) bool {
 	switch c.HarnessMode() {
 	case "on":
@@ -90,15 +91,50 @@ func (c *Config) HarnessEnabledForRoot(workspaceRoot string) bool {
 	case "off":
 		return false
 	default: // auto
-		root := strings.TrimSpace(workspaceRoot)
-		if root == "" {
-			root = "."
-		}
-		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
-			return true
-		}
+		return hasGoHarnessSignal(workspaceRoot)
+	}
+}
+
+// hasGoHarnessSignal mirrors harness.HasGoHarnessSignal without importing
+// internal/harness (config sits below harness in the layering graph).
+func hasGoHarnessSignal(workspaceRoot string) bool {
+	root := strings.TrimSpace(workspaceRoot)
+	if root == "" {
+		root = "."
+	}
+	if fileExists(filepath.Join(root, "go.mod")) || fileExists(filepath.Join(root, "go.work")) {
+		return true
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
 		return false
 	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if name == "" || name[0] == '.' || name == "node_modules" || name == "vendor" || name == "testdata" {
+			continue
+		}
+		if fileExists(filepath.Join(root, name, "go.mod")) {
+			return true
+		}
+		n++
+		if n >= 64 {
+			break
+		}
+	}
+	return false
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir()
 }
 
 // HarnessEnabled is legacy: true only for mode "on" (not auto). Prefer HarnessEnabledForRoot.

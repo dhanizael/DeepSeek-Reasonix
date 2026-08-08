@@ -90,7 +90,7 @@ Before building anything enhanced, ask:
 | # | Enhanced feature | Status in binary today | Upstream equivalent | Decision | Why |
 |---|------------------|------------------------|---------------------|----------|-----|
 | 1 | **TUI watchdog stall = 5m** | **Always on** | Default ~10s + lifecycle watchdog | **KEEP-POLICY** | Idle prompt must not kill the process. Keep 5m + upstream `tuiWatchdogCancelGrace`. |
-| 2 | **Verification harness** | **Live (mode=auto)** Go workspaces; package-scoped; skip in-flight/cooldown; **silent pass** (default); **turn budget** (default 12); capped fail feedback | Goal **verification evidence** (model-run checks) | **KEEP** | Host evidence without full-repo `./...`; token-thrift feedback. |
+| 2 | **Verification harness** | **Live (mode=auto)** multi-module aware; package-scoped; skip in-flight/cooldown; **silent pass**; **turn budget**; capped fail feedback | Goal **verification evidence** (model-run checks) | **KEEP** | Host evidence without full-repo `./...`; token-thrift feedback. |
 | 3 | **3-strike backtrack** | **With harness**; checkpoint preimage then git | `repeatFailureGuard` + checkpoint rewind | **MERGE** | Stop bad loops; restore via upstream store when possible. |
 | 4 | **Shadow checkpoints** | **Quarantined** (deprecated; not on control path) | Production checkpoint + rewind | **DROP** dual-stack | Upstream wins; do not dual `/undo`. |
 | 5 | **AST Syntax Guard** | **Live default-on** on write/edit/multi_edit | Atomic write + FileOverlay | **KEEP** | Content validation before commit; fewer broken-disk turns. |
@@ -113,9 +113,12 @@ DONE  P7  Silent pass (default): zero tool-result text on harness pass;
          metrics harness_silent_pass; opt-out via silent_pass=false
 DONE  P8  Budget gate: max harness shell-outs per Agent.Run (default 12);
          skip reason budget_exhausted (silent); reset via BeginTurn
+DONE  P9  Tighter package detection / multi-module monorepos:
+         nested go.mod → cd module + go test ./pkg; auto on go.work /
+         depth-1 modules; bound findUp to workDir; skip non-Go inputs;
+         python package scope via nearest pyproject/pytest markers
 
 NEXT  (only if gates G1–G5 pass)
-      - Tighter package detection / multi-module monorepos
       - Never: system-prompt quality hacks, dual undo, dual prefix enforcers
 ```
 

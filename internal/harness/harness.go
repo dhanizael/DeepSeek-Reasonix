@@ -101,7 +101,8 @@ func (d *Detector) DetectCommand(dir string) (string, bool) {
 		return "", false
 	}
 
-	if fileExists(filepath.Join(dir, "go.mod")) {
+	// Root module or go.work multi-module workspace both use ./...
+	if fileExists(filepath.Join(dir, "go.mod")) || fileExists(filepath.Join(dir, "go.work")) {
 		return "go test ./...", true
 	}
 
@@ -132,6 +133,10 @@ func (d *Detector) DetectCommand(dir string) (string, bool) {
 
 // DetectScopedCommand builds a package/dir-scoped command for mutationPath when
 // possible. Falls back to DetectCommand when scoping is not available.
+//
+// Multi-module Go monorepos: runs `cd <nearest-go.mod-dir> && go test ./pkg`
+// so nested modules are not tested from the wrong cwd. Lookups stop at workDir
+// so parent-of-workspace module markers are never used.
 func (d *Detector) DetectScopedCommand(workDir, mutationPath string) (cmd string, scope string, ok bool) {
 	workDir = strings.TrimSpace(workDir)
 	if workDir == "" {
@@ -149,15 +154,16 @@ func (d *Detector) DetectScopedCommand(workDir, mutationPath string) (cmd string
 		absMut = filepath.Join(workDir, mutationPath)
 	}
 	absMut = filepath.Clean(absMut)
+	absWork := absPath(workDir)
 
-	if _, pkgRel, found := goPackageForFile(absMut); found {
-		if pkgRel == "" || pkgRel == "." {
-			return "go test .", ScopePackage, true
+	// Go: only for build-relevant inputs under the nearest go.mod (bounded).
+	if isGoBuildInput(absMut) {
+		if modRoot, pkgRel, found := goPackageForFile(absMut, absWork); found {
+			return goTestCommand(absWork, modRoot, pkgRel), ScopePackage, true
 		}
-		return "go test ./" + filepath.ToSlash(pkgRel), ScopePackage, true
 	}
 
-	if pkgDir, found := findUp(absMut, "package.json"); found {
+	if pkgDir, found := findUpBounded(absMut, "package.json", absWork); found {
 		var runner string
 		if fileExists(filepath.Join(pkgDir, "pnpm-lock.yaml")) {
 			runner = "pnpm test"
@@ -169,12 +175,53 @@ func (d *Detector) DetectScopedCommand(workDir, mutationPath string) (cmd string
 		return fmt.Sprintf("cd %s && %s", shellSingleQuote(pkgDir), runner), ScopePackage, true
 	}
 
-	if crateDir, found := findUp(absMut, "Cargo.toml"); found {
+	if crateDir, found := findUpBounded(absMut, "Cargo.toml", absWork); found {
 		return fmt.Sprintf("cd %s && cargo test", shellSingleQuote(crateDir)), ScopePackage, true
 	}
 
-	c, ok := d.DetectCommand(workDir)
-	return c, ScopeWorkspace, ok
+	if pyDir, found := findPythonProjectRoot(absMut, absWork); found {
+		return fmt.Sprintf("cd %s && pytest -q", shellSingleQuote(pyDir)), ScopePackage, true
+	}
+
+	// No package-level scope matched. Avoid falling back to full-workspace
+	// suites for unrelated edits (docs, images, lockfiles) — that burns the
+	// turn budget and injects noise. Callers with Scope=workspace still use
+	// DetectCommand directly.
+	return "", "", false
+}
+
+// HasGoHarnessSignal reports whether workDir looks like a Go workspace worth
+// auto-enabling the harness for (root go.mod/go.work, or depth-1 nested module).
+func HasGoHarnessSignal(workDir string) bool {
+	workDir = strings.TrimSpace(workDir)
+	if workDir == "" {
+		workDir = "."
+	}
+	if fileExists(filepath.Join(workDir, "go.mod")) || fileExists(filepath.Join(workDir, "go.work")) {
+		return true
+	}
+	entries, err := os.ReadDir(workDir)
+	if err != nil {
+		return false
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if name == "" || name[0] == '.' || name == "node_modules" || name == "vendor" || name == "testdata" {
+			continue
+		}
+		if fileExists(filepath.Join(workDir, name, "go.mod")) {
+			return true
+		}
+		n++
+		if n >= 64 {
+			break
+		}
+	}
+	return false
 }
 
 // Harness executes automated verification loops after mutations.
@@ -429,12 +476,14 @@ func normalizeScope(s string) string {
 	}
 }
 
-func goPackageForFile(absFile string) (modRoot, pkgRel string, ok bool) {
+// goPackageForFile finds the nearest go.mod at or above absFile, stopping at
+// workDir (inclusive). Nested modules win over the monorepo root module.
+func goPackageForFile(absFile, workDir string) (modRoot, pkgRel string, ok bool) {
 	dir := absFile
 	if info, err := os.Stat(absFile); err == nil && !info.IsDir() {
 		dir = filepath.Dir(absFile)
 	}
-	modRoot, found := findUp(dir, "go.mod")
+	modRoot, found := findUpBounded(dir, "go.mod", workDir)
 	if !found {
 		return "", "", false
 	}
@@ -449,14 +498,71 @@ func goPackageForFile(absFile string) (modRoot, pkgRel string, ok bool) {
 	return modRoot, rel, true
 }
 
+// goTestCommand builds a package-scoped go test invocation. When the module
+// root differs from the agent workDir (nested module), cd into the module so
+// `go test ./pkg` resolves correctly.
+func goTestCommand(workDir, modRoot, pkgRel string) string {
+	relArg := "."
+	if pkgRel != "" && pkgRel != "." {
+		relArg = "./" + filepath.ToSlash(pkgRel)
+	}
+	if sameDir(workDir, modRoot) {
+		if relArg == "." {
+			return "go test ."
+		}
+		return "go test " + relArg
+	}
+	return fmt.Sprintf("cd %s && go test %s", shellSingleQuote(modRoot), relArg)
+}
+
+// isGoBuildInput reports whether path is a file that should trigger a Go
+// package verify (avoids running go test after markdown/docs-only edits).
+func isGoBuildInput(path string) bool {
+	base := strings.ToLower(filepath.Base(path))
+	switch base {
+	case "go.mod", "go.sum", "go.work", "go.work.sum":
+		return true
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".go", ".s", ".c", ".h", ".cc", ".cpp", ".cxx", ".syso":
+		return true
+	default:
+		return false
+	}
+}
+
+func findPythonProjectRoot(start, stopAt string) (dir string, ok bool) {
+	for _, marker := range []string{"pytest.ini", "pyproject.toml", "setup.py", "setup.cfg", "tox.ini"} {
+		if d, found := findUpBounded(start, marker, stopAt); found {
+			return d, true
+		}
+	}
+	return "", false
+}
+
+// findUp walks parents unbounded (legacy callers / tests). Prefer findUpBounded.
 func findUp(start, name string) (dir string, ok bool) {
+	return findUpBounded(start, name, "")
+}
+
+// findUpBounded walks parents from start looking for name, stopping after
+// inspecting stopAt (inclusive). Empty stopAt means unbounded (to filesystem root).
+func findUpBounded(start, name, stopAt string) (dir string, ok bool) {
 	dir = start
 	if info, err := os.Stat(start); err == nil && !info.IsDir() {
 		dir = filepath.Dir(start)
 	}
+	stop := ""
+	if strings.TrimSpace(stopAt) != "" {
+		stop = absPath(stopAt)
+	}
 	for {
 		if fileExists(filepath.Join(dir, name)) {
 			return dir, true
+		}
+		if stop != "" && sameDir(dir, stop) {
+			return "", false
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -464,6 +570,22 @@ func findUp(start, name string) (dir string, ok bool) {
 		}
 		dir = parent
 	}
+}
+
+func absPath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		p = "."
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return filepath.Clean(p)
+	}
+	return filepath.Clean(abs)
+}
+
+func sameDir(a, b string) bool {
+	return absPath(a) == absPath(b)
 }
 
 func shellSingleQuote(s string) string {

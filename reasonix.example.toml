@@ -261,8 +261,9 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # behind_proxy = false      # set true when behind a trusted reverse proxy (nginx, Caddy, etc.) that sets X-Forwarded-* headers
 
 # reasonix-enhanced fork knobs (ignored by upstream builds without this struct field).
-# AST defaults on. Harness mode=auto runs package-scoped checks when go.mod exists
-# (e.g. go test ./internal/foo after editing that package — not full ./...).
+# AST defaults on. Harness mode=auto when go.mod, go.work, or a depth-1 nested
+# go.mod exists. Package scope uses the nearest module (cd into nested go.mod
+# for multi-module monorepos) e.g. go test ./internal/foo — not full ./....
 # silent_pass=true (default): harness success injects zero tool-result text
 # (token thrift; still recorded in ~/.reasonix/enhanced-metrics.jsonl).
 # Failures always emit capped, actionable feedback. Set silent_pass=false for

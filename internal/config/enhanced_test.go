@@ -92,6 +92,32 @@ func TestHarnessEnabledForRootAuto(t *testing.T) {
 	}
 }
 
+func TestHarnessEnabledForRootAutoGoWork(t *testing.T) {
+	cfg := Default()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.work"), []byte("go 1.22\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.HarnessEnabledForRoot(root) {
+		t.Fatal("auto with go.work => on")
+	}
+}
+
+func TestHarnessEnabledForRootAutoNestedModule(t *testing.T) {
+	cfg := Default()
+	root := t.TempDir()
+	mod := filepath.Join(root, "services")
+	if err := os.MkdirAll(mod, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mod, "go.mod"), []byte("module svc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.HarnessEnabledForRoot(root) {
+		t.Fatal("auto with depth-1 nested go.mod => on")
+	}
+}
+
 func TestBacktrackExplicitFalse(t *testing.T) {
 	cfg := Default()
 	off := false
