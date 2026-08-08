@@ -33,6 +33,9 @@ type EnhancedASTGuardConfig struct {
 // SilentPass (nil/default true): on harness pass, inject no tool-result text
 // into the model transcript (token thrift). Failures always emit capped feedback.
 // Set silent_pass = false to restore the one-line ✅ notice.
+//
+// MaxAttemptsPerTurn caps shell-out verifies per Agent.Run (0 = default 12;
+// negative = unlimited). Cooldown/in-flight skips do not consume the budget.
 type EnhancedHarnessConfig struct {
 	Enabled        bool   `toml:"enabled"`
 	Mode           string `toml:"mode"` // auto|on|off
@@ -43,6 +46,8 @@ type EnhancedHarnessConfig struct {
 	Scope string `toml:"scope"`
 	// SilentPass: nil or true = suppress pass notices; false = one-line notice.
 	SilentPass *bool `toml:"silent_pass"`
+	// MaxAttemptsPerTurn: 0 uses harness default (12); negative disables cap.
+	MaxAttemptsPerTurn int `toml:"max_attempts_per_turn"`
 }
 
 // EnhancedBacktrackConfig controls the 3-strike policy after harness failures.
@@ -121,6 +126,16 @@ func (c *Config) HarnessSilentPass() bool {
 		return true
 	}
 	return *c.Enhanced.Harness.SilentPass
+}
+
+// HarnessMaxAttemptsPerTurn returns the per-turn verify budget for boot wiring.
+// 0 means "use harness package default" (caller should pass 0 through to
+// harness.Config so DefaultMaxAttemptsPerTurn applies). Negative = unlimited.
+func (c *Config) HarnessMaxAttemptsPerTurn() int {
+	if c == nil {
+		return 0
+	}
+	return c.Enhanced.Harness.MaxAttemptsPerTurn
 }
 
 // BacktrackEnabled reports whether backtrack installs given harnessActive.

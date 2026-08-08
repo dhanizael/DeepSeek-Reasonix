@@ -277,6 +277,7 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # timeout_seconds = 45
 # max_output_bytes = 2048 # fail-output cap into tool results (ceiling 4096)
 # silent_pass = true      # default true; false restores one-line pass notice
+# max_attempts_per_turn = 12  # shell-outs per Agent.Run; 0=default 12; -1=unlimited
 # enabled = false         # legacy; empty mode + false => auto
 
 [enhanced.backtrack]

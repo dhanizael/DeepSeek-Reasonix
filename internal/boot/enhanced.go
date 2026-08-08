@@ -38,6 +38,8 @@ func applyEnhancedConfig(cfg *config.Config, executor *agent.Agent, workspaceRoo
 		hcfg.CustomCommand = cfg.Enhanced.Harness.Command
 		hcfg.Scope = cfg.HarnessScope()
 		hcfg.SilentPass = cfg.HarnessSilentPass()
+		// 0 keeps DefaultMaxAttemptsPerTurn; negative disables the turn budget.
+		hcfg.MaxAttemptsPerTurn = cfg.HarnessMaxAttemptsPerTurn()
 		if cfg.Enhanced.Harness.TimeoutSeconds > 0 {
 			hcfg.Timeout = time.Duration(cfg.Enhanced.Harness.TimeoutSeconds) * time.Second
 		}

@@ -66,6 +66,37 @@ func TestAgentVerificationHarnessIntegrationVerbosePass(t *testing.T) {
 	}
 }
 
+func TestAgentRunResetsHarnessTurnBudget(t *testing.T) {
+	// Budget is owned by the harness; Agent.Run must call BeginTurn so a long
+	// session does not permanently exhaust verifies after one busy turn.
+	tempDir := t.TempDir()
+	cfg := harness.DefaultConfig()
+	cfg.CustomCommand = "echo ok"
+	cfg.PassCooldown = -1
+	cfg.MaxAttemptsPerTurn = 1
+	h := harness.NewHarness(cfg)
+
+	// Exhaust without going through Run.
+	r1 := h.Verify(context.Background(), tempDir)
+	if !r1.Attempted {
+		t.Fatalf("first should attempt: %+v", r1)
+	}
+	r2 := h.Verify(context.Background(), tempDir)
+	if !r2.Skipped || r2.SkipReason != "budget_exhausted" {
+		t.Fatalf("second should exhaust: %+v", r2)
+	}
+
+	a := &Agent{writeWorkspaceRoot: tempDir}
+	a.SetVerificationHarness(h)
+	// Mimic Run's budget reset without a full tool loop.
+	a.verificationHarness.BeginTurn()
+
+	r3 := h.Verify(context.Background(), tempDir)
+	if !r3.Attempted {
+		t.Fatalf("after BeginTurn should attempt again: %+v", r3)
+	}
+}
+
 func TestAgentBacktrackTriggerIntegration(t *testing.T) {
 	tempDir := t.TempDir()
 

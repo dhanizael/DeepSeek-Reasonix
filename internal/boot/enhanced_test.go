@@ -103,6 +103,30 @@ func TestApplyEnhancedConfigModeOnWithCustomCommand(t *testing.T) {
 	}
 }
 
+func TestApplyEnhancedConfigMaxAttemptsPerTurn(t *testing.T) {
+	t.Cleanup(func() { builtin.SetASTSyntaxGuardEnabled(true) })
+
+	cfg := config.Default()
+	cfg.Enhanced.Harness.Mode = "on"
+	cfg.Enhanced.Harness.Command = "echo ok"
+	cfg.Enhanced.Harness.MaxAttemptsPerTurn = 3
+	off := false
+	cfg.Enhanced.Backtrack.Enabled = &off
+
+	a := agent.New(nil, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{
+		WriteWorkspaceRoot: t.TempDir(),
+	}, event.Discard)
+	applyEnhancedConfig(cfg, a, t.TempDir())
+
+	h := a.VerificationHarness()
+	if h == nil {
+		t.Fatal("expected harness")
+	}
+	if h.MaxAttemptsPerTurn() != 3 {
+		t.Fatalf("max per turn = %d want 3", h.MaxAttemptsPerTurn())
+	}
+}
+
 func TestApplyEnhancedConfigSilentPassFalse(t *testing.T) {
 	t.Cleanup(func() { builtin.SetASTSyntaxGuardEnabled(true) })
 

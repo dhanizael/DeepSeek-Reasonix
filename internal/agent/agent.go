@@ -1394,6 +1394,10 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			runMaxStepsKey = limit.key
 		}
 	}
+	// Reset host harness turn budget (verify count) — does not touch prompts/cache.
+	if a.verificationHarness != nil {
+		a.verificationHarness.BeginTurn()
+	}
 	a.recoveryRunSeq.Add(1)
 	if a.deliveryProfile && a.workspaceLease != nil {
 		a.workspaceLease.BeginRun()

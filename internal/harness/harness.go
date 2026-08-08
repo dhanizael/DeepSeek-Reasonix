@@ -31,6 +31,11 @@ const DefaultMaxOutputBytes = 2048
 // or re-append identical pass notices into the transcript.
 const DefaultPassCooldown = 3 * time.Second
 
+// DefaultMaxAttemptsPerTurn caps actual verify runs (shell out) per agent Run.
+// Cooldown / in-flight skips do not consume the budget. 0 in Config uses this;
+// negative means unlimited.
+const DefaultMaxAttemptsPerTurn = 12
+
 // Result represents the outcome of an automated verification run.
 type Result struct {
 	Attempted  bool
@@ -62,18 +67,22 @@ type Config struct {
 	// SilentPass omits pass notices from FormatFeedback (token thrift).
 	// Failures always emit capped feedback. Default true.
 	SilentPass bool `json:"silent_pass"`
+	// MaxAttemptsPerTurn limits shell-out verifies per agent turn.
+	// 0 uses DefaultMaxAttemptsPerTurn; negative disables the cap.
+	MaxAttemptsPerTurn int `json:"max_attempts_per_turn,omitempty"`
 }
 
 // DefaultConfig returns defaults tuned for reasonix-enhanced: package-scoped
-// checks, tight output cap (token thrift), hard timeout, silent pass.
+// checks, tight output cap (token thrift), hard timeout, silent pass, turn budget.
 func DefaultConfig() Config {
 	return Config{
-		Enabled:        true,
-		Timeout:        45 * time.Second,
-		MaxOutputBytes: DefaultMaxOutputBytes,
-		Scope:          ScopePackage,
-		PassCooldown:   DefaultPassCooldown,
-		SilentPass:     true,
+		Enabled:            true,
+		Timeout:            45 * time.Second,
+		MaxOutputBytes:     DefaultMaxOutputBytes,
+		Scope:              ScopePackage,
+		PassCooldown:       DefaultPassCooldown,
+		SilentPass:         true,
+		MaxAttemptsPerTurn: DefaultMaxAttemptsPerTurn,
 	}
 }
 
@@ -173,10 +182,12 @@ type Harness struct {
 	config   Config
 	detector *Detector
 
-	mu        sync.Mutex
-	inFlight  map[string]struct{} // key: workDir\x00cmd
-	lastPass  map[string]time.Time
-	passCD    time.Duration
+	mu           sync.Mutex
+	inFlight     map[string]struct{} // key: workDir\x00cmd
+	lastPass     map[string]time.Time
+	passCD       time.Duration
+	maxPerTurn   int // >0 capped; <0 unlimited
+	turnAttempts int // actual shell-outs this turn; reset by BeginTurn
 }
 
 // NewHarness constructs a verification harness.
@@ -196,13 +207,47 @@ func NewHarness(cfg Config) *Harness {
 	if cd == 0 {
 		cd = DefaultPassCooldown
 	}
-	return &Harness{
-		config:   cfg,
-		detector: NewDetector(),
-		inFlight: make(map[string]struct{}),
-		lastPass: make(map[string]time.Time),
-		passCD:   cd,
+	maxTurn := cfg.MaxAttemptsPerTurn
+	if maxTurn == 0 {
+		maxTurn = DefaultMaxAttemptsPerTurn
 	}
+	return &Harness{
+		config:     cfg,
+		detector:   NewDetector(),
+		inFlight:   make(map[string]struct{}),
+		lastPass:   make(map[string]time.Time),
+		passCD:     cd,
+		maxPerTurn: maxTurn,
+	}
+}
+
+// BeginTurn resets the per-turn verify budget. Call at the start of each
+// Agent.Run so long sessions do not permanently exhaust the cap.
+func (h *Harness) BeginTurn() {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	h.turnAttempts = 0
+	h.mu.Unlock()
+}
+
+// TurnAttempts returns how many verifies have shell-out so far this turn.
+func (h *Harness) TurnAttempts() int {
+	if h == nil {
+		return 0
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.turnAttempts
+}
+
+// MaxAttemptsPerTurn returns the active turn budget (<0 = unlimited).
+func (h *Harness) MaxAttemptsPerTurn() int {
+	if h == nil {
+		return 0
+	}
+	return h.maxPerTurn
 }
 
 // Verify runs verification for the whole workDir (workspace scope).
@@ -213,8 +258,9 @@ func (h *Harness) Verify(ctx context.Context, workDir string) Result {
 // VerifyPath runs verification scoped to mutationPath when Config.Scope is
 // package (default). CustomCommand always wins and runs at workDir.
 //
-// Token thrift: skips when the same command is already running, or passed
-// within PassCooldown (no extra tool-result text, local metric only).
+// Token thrift: skips when the turn budget is exhausted, the same command is
+// already running, or it passed within PassCooldown (no extra tool-result text,
+// local metric only).
 func (h *Harness) VerifyPath(ctx context.Context, workDir, mutationPath string) Result {
 	if h == nil || !h.config.Enabled {
 		return Result{Attempted: false}
@@ -303,6 +349,11 @@ func (h *Harness) VerifyPath(ctx context.Context, workDir, mutationPath string) 
 func (h *Harness) beginRun(key string) (skip bool, reason string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	// Budget first: do not open in-flight slots or shell out once the turn
+	// has spent its verify allowance (G2: skip silent when safe).
+	if h.maxPerTurn > 0 && h.turnAttempts >= h.maxPerTurn {
+		return true, "budget_exhausted"
+	}
 	if _, busy := h.inFlight[key]; busy {
 		return true, "already_running"
 	}
@@ -312,6 +363,7 @@ func (h *Harness) beginRun(key string) (skip bool, reason string) {
 		}
 	}
 	h.inFlight[key] = struct{}{}
+	h.turnAttempts++
 	return false, ""
 }
 

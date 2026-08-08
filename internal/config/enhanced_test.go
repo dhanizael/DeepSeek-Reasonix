@@ -20,6 +20,7 @@ timeout_seconds = 15
 scope = "package"
 max_output_bytes = 2048
 silent_pass = false
+max_attempts_per_turn = 8
 
 [enhanced.backtrack]
 enabled = true
@@ -43,6 +44,9 @@ max_strikes = 4
 	}
 	if cfg.HarnessSilentPass() {
 		t.Fatal("silent_pass=false should disable silent pass")
+	}
+	if cfg.HarnessMaxAttemptsPerTurn() != 8 {
+		t.Fatalf("max_attempts_per_turn = %d", cfg.HarnessMaxAttemptsPerTurn())
 	}
 	if !cfg.BacktrackEnabled(true) || cfg.Enhanced.Backtrack.MaxStrikes != 4 {
 		t.Fatalf("backtrack = %+v", cfg.Enhanced.Backtrack)

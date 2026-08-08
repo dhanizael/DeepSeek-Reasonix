@@ -137,3 +137,61 @@ func TestMaxOutputBytesCeiling(t *testing.T) {
 		t.Fatalf("ceiling broken: %d", h.config.MaxOutputBytes)
 	}
 }
+
+func TestTurnBudgetExhaustsAndResets(t *testing.T) {
+	enhancedmetrics.Reset()
+	cfg := DefaultConfig()
+	cfg.CustomCommand = "echo ok"
+	cfg.PassCooldown = -1 // disable cooldown so every call would shell out
+	cfg.MaxAttemptsPerTurn = 2
+	h := NewHarness(cfg)
+	dir := t.TempDir()
+
+	r1 := h.Verify(context.Background(), dir)
+	r2 := h.Verify(context.Background(), dir)
+	r3 := h.Verify(context.Background(), dir)
+
+	if !r1.Attempted || !r1.Passed {
+		t.Fatalf("r1 should attempt: %+v", r1)
+	}
+	if !r2.Attempted || !r2.Passed {
+		t.Fatalf("r2 should attempt: %+v", r2)
+	}
+	if r3.Attempted || !r3.Skipped || r3.SkipReason != "budget_exhausted" {
+		t.Fatalf("r3 should hit budget: %+v", r3)
+	}
+	if r3.FormatFeedback() != "" {
+		t.Fatal("budget skip must be silent")
+	}
+	if h.TurnAttempts() != 2 {
+		t.Fatalf("turnAttempts = %d want 2", h.TurnAttempts())
+	}
+	snap := enhancedmetrics.Snapshot()
+	if snap.HarnessSkipped < 1 {
+		t.Fatalf("expected budget skip metric: %+v", snap)
+	}
+
+	h.BeginTurn()
+	if h.TurnAttempts() != 0 {
+		t.Fatalf("BeginTurn should reset, got %d", h.TurnAttempts())
+	}
+	r4 := h.Verify(context.Background(), dir)
+	if !r4.Attempted || !r4.Passed {
+		t.Fatalf("after BeginTurn should attempt again: %+v", r4)
+	}
+}
+
+func TestTurnBudgetUnlimited(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.CustomCommand = "echo ok"
+	cfg.PassCooldown = -1
+	cfg.MaxAttemptsPerTurn = -1
+	h := NewHarness(cfg)
+	dir := t.TempDir()
+	for i := 0; i < 5; i++ {
+		r := h.Verify(context.Background(), dir)
+		if !r.Attempted {
+			t.Fatalf("unlimited budget skipped at i=%d: %+v", i, r)
+		}
+	}
+}
