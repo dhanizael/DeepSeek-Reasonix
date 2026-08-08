@@ -261,15 +261,20 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # behind_proxy = false      # set true when behind a trusted reverse proxy (nginx, Caddy, etc.) that sets X-Forwarded-* headers
 
 # reasonix-enhanced fork knobs (ignored by upstream builds without this struct field).
-# AST guard defaults on; harness/backtrack stay off unless enabled.
+# AST defaults on. Harness mode=auto runs package-scoped checks when go.mod exists
+# (e.g. go test ./internal/foo after editing that package — not full ./...).
+# Backtrack follows harness and prefers session checkpoint preimage, then git.
 [enhanced.ast_guard]
 # enabled = true
 
 [enhanced.harness]
-enabled = false
-# command = "go test ./..."
-# timeout_seconds = 30
+# mode = "auto"           # auto|on|off (default auto)
+# scope = "package"       # package|workspace
+# command = ""            # optional override
+# timeout_seconds = 45
+# enabled = false         # legacy; empty mode + false => auto
 
 [enhanced.backtrack]
-enabled = false
+# enabled follows harness when omitted
+# enabled = false
 # max_strikes = 3

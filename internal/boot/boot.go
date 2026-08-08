@@ -1795,9 +1795,9 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		MissingReasoningWarnStateDir: config.MissingReasoningWarnStateDir(),
 	}, sink)
 
-	// reasonix-enhanced: AST guard defaults on; harness/backtrack only when
-	// [enhanced] explicitly enables them (never default-on full-workspace tests).
-	applyEnhancedConfig(cfg, executor)
+	// reasonix-enhanced: AST on; harness mode=auto (package-scoped for Go workspaces);
+	// backtrack follows harness and prefers checkpoint preimage restore.
+	applyEnhancedConfig(cfg, executor, root)
 
 	var runner agent.Runner = executor
 	label := entry.Model

@@ -748,8 +748,10 @@ func (a *Agent) SetPreEditHook(fn func(diff.Change)) { a.onPreEdit = fn }
 // SetMutationObserver installs the unified mutation observer. When set, it
 // supersedes onPreEdit for capture and also records after-mutation fingerprints.
 // When a task tool is already registered it inherits the observer for sub-agents.
+// Also rebinds 3-strike rollback to prefer checkpoint preimage restore.
 func (a *Agent) SetMutationObserver(obs *checkpoint.MutationObserver) {
 	a.mutationObserver = obs
+	a.rebindBacktrackRollback()
 	if a.tools == nil || obs == nil {
 		return
 	}
@@ -781,8 +783,47 @@ func (a *Agent) VerificationHarness() *harness.Harness {
 }
 
 // SetBacktrackGuard installs the 3-strike backtrack and rollback guard.
-// Pass nil to clear. Boot only installs when [enhanced.backtrack].enabled is true.
-func (a *Agent) SetBacktrackGuard(b *harness.BacktrackGuard) { a.backtrackGuard = b }
+// Pass nil to clear. Prefer installing after or before MutationObserver; either
+// order rebinds checkpoint-preferring rollback.
+func (a *Agent) SetBacktrackGuard(b *harness.BacktrackGuard) {
+	a.backtrackGuard = b
+	a.rebindBacktrackRollback()
+}
+
+// rebindBacktrackRollback prefers session checkpoint preimage, then git.
+func (a *Agent) rebindBacktrackRollback() {
+	if a == nil || a.backtrackGuard == nil {
+		return
+	}
+	a.backtrackGuard.SetRollbackFunc(func(ctx context.Context, workDir, targetFile string) (string, error) {
+		return a.rollbackMutation(ctx, workDir, targetFile)
+	})
+}
+
+// rollbackMutation restores a file using checkpoint preimage when available,
+// otherwise git checkout HEAD. Used by the 3-strike backtrack path.
+func (a *Agent) rollbackMutation(ctx context.Context, workDir, targetFile string) (string, error) {
+	if a != nil && targetFile != "" && a.mutationObserver != nil {
+		if store := a.mutationObserver.Store(); store != nil {
+			plan, err := store.PrepareFileRevert(targetFile, 0)
+			if err == nil && plan.CanFiles && plan.PlanID != "" {
+				res, cerr := store.CommitFileRevert(plan.PlanID, checkpoint.ResolveOverwriteCheckpoint)
+				if cerr == nil && res.OK {
+					return "checkpoint preimage restore for " + targetFile, nil
+				}
+			}
+			// One more attempt after a stale plan / conflict path.
+			plan2, err2 := store.PrepareFileRevert(targetFile, 0)
+			if err2 == nil && plan2.CanFiles && plan2.PlanID != "" {
+				res2, cerr2 := store.CommitFileRevert(plan2.PlanID, checkpoint.ResolveOverwriteCheckpoint)
+				if cerr2 == nil && res2.OK {
+					return "checkpoint preimage restore for " + targetFile, nil
+				}
+			}
+		}
+	}
+	return harness.GitCheckoutRollback(ctx, workDir, targetFile)
+}
 
 // BacktrackGuard returns the installed backtrack guard, or nil.
 func (a *Agent) BacktrackGuard() *harness.BacktrackGuard {

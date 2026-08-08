@@ -919,13 +919,18 @@ func (a *Agent) observeAfterMutation(ctx context.Context, plan *toolCallPlan, re
 		if workDir == "" {
 			workDir = "."
 		}
-		verRes := a.verificationHarness.Verify(ctx, workDir)
+		// Package-scoped verify when mutation path is known (avoids go test ./... storms).
+		verRes := a.verificationHarness.VerifyPath(ctx, workDir, plan.mutationPath)
 		if verRes.Attempted {
 			feedback := verRes.FormatFeedback()
 			if !verRes.Passed && a.backtrackGuard != nil {
 				_, triggered := a.backtrackGuard.RecordFailure(plan.mutationPath)
 				if triggered {
-					_, _ = a.backtrackGuard.Rollback(ctx, workDir, plan.mutationPath)
+					if detail, err := a.backtrackGuard.Rollback(ctx, workDir, plan.mutationPath); err == nil && detail != "" {
+						feedback += "\n[Backtrack] " + detail + "\n"
+					} else if err != nil {
+						feedback += "\n[Backtrack] auto-restore failed (" + err.Error() + "); discard the failed approach.\n"
+					}
 					feedback += a.backtrackGuard.FormatBacktrackDirective(plan.mutationPath)
 				}
 			} else if verRes.Passed && a.backtrackGuard != nil {
