@@ -65,6 +65,11 @@ func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, e
 	if rerr == nil && src.content == p.Content {
 		return fmt.Sprintf("%s already contains the exact content; no changes made", p.Path), nil
 	}
+	// reasonix-enhanced: reject broken Go/JSON (and bracket-checked langs) before
+	// any overlay or disk commit so the agent sees a tool error, not a corrupt file.
+	if err := rejectInvalidSyntax(p.Path, p.Content); err != nil {
+		return "", err
+	}
 	// The host overlay applies the write to the editor buffer and the file in
 	// one step. Text-only, so it handles plain UTF-8 targets (and new files);
 	// non-UTF-8 files stay on the local encoding-preserving path below.

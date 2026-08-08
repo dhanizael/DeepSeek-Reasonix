@@ -12,6 +12,9 @@ import (
 )
 
 // SnapshotMeta stores metadata about an atomic shadow checkpoint.
+//
+// Deprecated: fork prototype only. Prefer upstream checkpoint.Store and
+// control.PrepareRewind / CommitRewind for production undo.
 type SnapshotMeta struct {
 	ID        string    `json:"id"`
 	Label     string    `json:"label"`
@@ -20,6 +23,11 @@ type SnapshotMeta struct {
 }
 
 // ShadowStore manages lightweight shadow checkpoints for atomic rollback and /undo capabilities.
+//
+// Deprecated: do not install on the production control path. This dual-tracks
+// undo against upstream MutationObserver + checkpoint rewind. CreateSnapshot /
+// RestoreLatest must not be called from live boot or agent observe paths.
+// See docs/ENHANCED_ROADMAP.md (DROP: ShadowStore).
 type ShadowStore struct {
 	mu        sync.Mutex
 	baseDir   string

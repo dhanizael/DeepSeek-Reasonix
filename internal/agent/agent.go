@@ -769,12 +769,32 @@ func (a *Agent) MutationObserver() *checkpoint.MutationObserver {
 }
 
 // SetVerificationHarness installs the automated verification harness loop.
+// Pass nil to clear. Boot only installs when [enhanced.harness].enabled is true.
 func (a *Agent) SetVerificationHarness(h *harness.Harness) { a.verificationHarness = h }
 
+// VerificationHarness returns the installed harness, or nil.
+func (a *Agent) VerificationHarness() *harness.Harness {
+	if a == nil {
+		return nil
+	}
+	return a.verificationHarness
+}
+
 // SetBacktrackGuard installs the 3-strike backtrack and rollback guard.
+// Pass nil to clear. Boot only installs when [enhanced.backtrack].enabled is true.
 func (a *Agent) SetBacktrackGuard(b *harness.BacktrackGuard) { a.backtrackGuard = b }
 
-// SetShadowStore installs the shadow checkpoint store for atomic undo operations.
+// BacktrackGuard returns the installed backtrack guard, or nil.
+func (a *Agent) BacktrackGuard() *harness.BacktrackGuard {
+	if a == nil {
+		return nil
+	}
+	return a.backtrackGuard
+}
+
+// SetShadowStore is deprecated: ShadowStore dual-tracks undo against upstream
+// MutationObserver/checkpoint rewind and must not be used on the production
+// control path. The method remains for tests of the quarantined prototype only.
 func (a *Agent) SetShadowStore(s *checkpoint.ShadowStore) { a.shadowStore = s }
 
 // Session returns the agent's current conversation, useful for persistence

@@ -11,15 +11,15 @@ import (
 func TestEditFileFuzzyTrailingWhitespace(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "main.go")
-	seed := "func main() {   \n\tfmt.Println(\"hello\")  \n}\n"
+	seed := "package main\n\nfunc main() {   \n\tprintln(\"hello\")  \n}\n"
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	out, err := (editFile{}).Execute(context.Background(), argsJSON(t, map[string]any{
 		"path":       path,
-		"old_string": "func main() {\n\tfmt.Println(\"hello\")\n}",
-		"new_string": "func main() {\n\tfmt.Println(\"bye\")\n}",
+		"old_string": "func main() {\n\tprintln(\"hello\")\n}",
+		"new_string": "func main() {\n\tprintln(\"bye\")\n}",
 	}))
 	if err != nil {
 		t.Fatalf("edit_file: %v", err)
@@ -31,7 +31,7 @@ func TestEditFileFuzzyTrailingWhitespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "func main() {\n\tfmt.Println(\"bye\")\n}\n"
+	want := "package main\n\nfunc main() {\n\tprintln(\"bye\")\n}\n"
 	if string(got) != want {
 		t.Fatalf("content = %q, want %q", got, want)
 	}

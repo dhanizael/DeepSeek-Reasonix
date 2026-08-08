@@ -14,7 +14,7 @@ import (
 // stale disk copy and overwrite what the user has not saved yet.
 func TestEditFileOverlayEditsUnsavedBuffer(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "a.go")
+	path := filepath.Join(dir, "a.txt")
 	if err := os.WriteFile(path, []byte("saved\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -25,13 +25,13 @@ func TestEditFileOverlayEditsUnsavedBuffer(t *testing.T) {
 	ef := editFile{workDir: dir, roots: realRoots([]string{dir}), overlay: overlay}
 
 	args, _ := json.Marshal(map[string]string{
-		"path": "a.go", "old_string": "unsaved", "new_string": "agent",
+		"path": "a.txt", "old_string": "unsaved", "new_string": "agent",
 	})
 	if _, err := ef.Execute(context.Background(), json.RawMessage(args)); err != nil {
 		t.Fatalf("Execute: %v — old_string only exists in the buffer, so a disk read fails here", err)
 	}
 	if got := overlay.writes[path]; got != "agent edit\n" {
-		t.Fatalf("overlay writes[a.go] = %q, want %q", got, "agent edit\n")
+		t.Fatalf("overlay writes[a.txt] = %q, want %q", got, "agent edit\n")
 	}
 	if b, _ := os.ReadFile(path); string(b) != "saved\n" {
 		t.Fatalf("disk = %q, want it untouched — the host owns persisting the buffer", b)
@@ -42,7 +42,7 @@ func TestEditFileOverlayEditsUnsavedBuffer(t *testing.T) {
 // approves is not the change that runs.
 func TestEditFilePreviewMatchesOverlayExecute(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "a.go")
+	path := filepath.Join(dir, "a.txt")
 	if err := os.WriteFile(path, []byte("saved\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestEditFilePreviewMatchesOverlayExecute(t *testing.T) {
 	}
 	ef := editFile{workDir: dir, roots: realRoots([]string{dir}), overlay: overlay}
 	args, _ := json.Marshal(map[string]string{
-		"path": "a.go", "old_string": "unsaved", "new_string": "agent",
+		"path": "a.txt", "old_string": "unsaved", "new_string": "agent",
 	})
 
 	change, err := ef.Preview(context.Background(), json.RawMessage(args))
@@ -72,7 +72,7 @@ func TestEditFilePreviewMatchesOverlayExecute(t *testing.T) {
 
 func TestMultiEditOverlayEditsUnsavedBuffer(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "m.go")
+	path := filepath.Join(dir, "m.txt")
 	if err := os.WriteFile(path, []byte("saved\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestMultiEditOverlayEditsUnsavedBuffer(t *testing.T) {
 	me := multiEdit{workDir: dir, roots: realRoots([]string{dir}), overlay: overlay}
 
 	args, _ := json.Marshal(map[string]any{
-		"path": "m.go",
+		"path": "m.txt",
 		"edits": []map[string]any{
 			{"old_string": "alpha", "new_string": "ALPHA"},
 			{"old_string": "beta", "new_string": "BETA"},
@@ -132,7 +132,7 @@ func TestEditFileOverlaySkipsNonUTF8(t *testing.T) {
 
 func TestEditFileOverlayMissFallsBackToDisk(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "d.go")
+	path := filepath.Join(dir, "d.txt")
 	if err := os.WriteFile(path, []byte("disk only\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestEditFileOverlayMissFallsBackToDisk(t *testing.T) {
 	ef := editFile{workDir: dir, roots: realRoots([]string{dir}), overlay: overlay}
 
 	args, _ := json.Marshal(map[string]string{
-		"path": "d.go", "old_string": "disk", "new_string": "local",
+		"path": "d.txt", "old_string": "disk", "new_string": "local",
 	})
 	if _, err := ef.Execute(context.Background(), json.RawMessage(args)); err != nil {
 		t.Fatalf("Execute: %v", err)

@@ -1795,6 +1795,10 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		MissingReasoningWarnStateDir: config.MissingReasoningWarnStateDir(),
 	}, sink)
 
+	// reasonix-enhanced: AST guard defaults on; harness/backtrack only when
+	// [enhanced] explicitly enables them (never default-on full-workspace tests).
+	applyEnhancedConfig(cfg, executor)
+
 	var runner agent.Runner = executor
 	label := entry.Model
 	// Two-model collaboration: a distinct planner_model wraps the executor in a

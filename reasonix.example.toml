@@ -259,3 +259,17 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # token      = ""          # pre-shared token for auth_mode = "token" (auto-generated if empty)
 # password_hash = ""       # bcrypt hash for auth_mode = "password". Generate with: reasonix serve --hash-password <password>
 # behind_proxy = false      # set true when behind a trusted reverse proxy (nginx, Caddy, etc.) that sets X-Forwarded-* headers
+
+# reasonix-enhanced fork knobs (ignored by upstream builds without this struct field).
+# AST guard defaults on; harness/backtrack stay off unless enabled.
+[enhanced.ast_guard]
+# enabled = true
+
+[enhanced.harness]
+enabled = false
+# command = "go test ./..."
+# timeout_seconds = 30
+
+[enhanced.backtrack]
+enabled = false
+# max_strikes = 3

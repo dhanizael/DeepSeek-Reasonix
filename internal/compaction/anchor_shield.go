@@ -38,12 +38,18 @@ func NewFrozenAnchor(systemPrompt string, toolsJSON string) *FrozenAnchor {
 }
 
 // AnchorShield protects the static prefix window against unexpected dynamic mutations.
+//
+// Deprecated: do not call EnforceAnchor on the production control path.
+// Upstream cache-aware context projection (CoveredPrefixHash, compact_projection)
+// owns prefix stability. See docs/ENHANCED_ROADMAP.md (DROP: AnchorShield enforcer).
 type AnchorShield struct {
 	mu     sync.RWMutex
 	anchor *FrozenAnchor
 }
 
 // NewAnchorShield constructs a shield manager.
+//
+// Deprecated: experimental only; not wired into boot or agent loops.
 func NewAnchorShield(systemPrompt string, toolsJSON string) *AnchorShield {
 	return &AnchorShield{
 		anchor: NewFrozenAnchor(systemPrompt, toolsJSON),
@@ -70,6 +76,8 @@ func (s *AnchorShield) IsStable(systemPrompt string, toolsJSON string) bool {
 }
 
 // EnforceAnchor Ensures that the session message list maintains the exact frozen system prompt at index 0.
+//
+// Deprecated: must not be called from live agent/boot paths (dual prefix rewriter).
 func (s *AnchorShield) EnforceAnchor(messages []provider.Message) []provider.Message {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -69,6 +69,11 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "", oldStringNotUniqueError(p.Path, p.OldString, src.content, applied.matches, false)
 	}
 
+	// reasonix-enhanced: validate post-edit content before commit.
+	if err := rejectInvalidSyntax(p.Path, applied.updated); err != nil {
+		return "", err
+	}
+
 	if err := src.write(ctx, e.overlay, p.Path, applied.updated); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}

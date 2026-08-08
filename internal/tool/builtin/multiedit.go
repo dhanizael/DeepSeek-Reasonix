@@ -114,6 +114,11 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 		}
 	}
 
+	// reasonix-enhanced: validate final buffer before the single atomic write.
+	if err := rejectInvalidSyntax(p.Path, content); err != nil {
+		return "", err
+	}
+
 	if err := src.write(ctx, m.overlay, p.Path, content); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}

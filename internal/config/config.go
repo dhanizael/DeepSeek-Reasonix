@@ -66,6 +66,9 @@ type Config struct {
 	Serve            ServeConfig         `toml:"serve"`
 	Secrets          SecretsConfig       `toml:"secrets"`
 	Remote           RemoteConfig        `toml:"remote"`
+	// Enhanced is reasonix-enhanced fork configuration (AST guard, optional
+	// host harness / backtrack). Upstream builds ignore this section.
+	Enhanced EnhancedConfig `toml:"enhanced"`
 
 	systemPromptFileSource     promptFileSource
 	providerSources            map[string]providerSourceScope

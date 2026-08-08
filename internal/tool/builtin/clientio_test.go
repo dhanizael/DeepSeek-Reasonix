@@ -73,11 +73,11 @@ func TestReadFileOverlayFallsBackToDisk(t *testing.T) {
 
 func TestWriteFileOverlayAppliesWrite(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "c.go")
+	path := filepath.Join(dir, "c.txt")
 	overlay := &fakeOverlay{writes: map[string]string{}}
 	wf := writeFile{workDir: dir, roots: realRoots([]string{dir}), overlay: overlay}
 
-	args, _ := json.Marshal(map[string]string{"path": "c.go", "content": "hello"})
+	args, _ := json.Marshal(map[string]string{"path": "c.txt", "content": "hello"})
 	out, err := wf.Execute(context.Background(), json.RawMessage(args))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
