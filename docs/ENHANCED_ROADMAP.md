@@ -95,7 +95,7 @@ Before building anything enhanced, ask:
 | 4 | **Shadow checkpoints** | **Quarantined** (deprecated; not on control path) | Production checkpoint + rewind | **DROP** dual-stack | Upstream wins; do not dual `/undo`. |
 | 5 | **AST Syntax Guard** | **Live default-on** on write/edit/multi_edit | Atomic write + FileOverlay | **KEEP** | Content validation before commit; fewer broken-disk turns. |
 | 6 | **Prefix Anchor Shield** | **Quarantined** (deprecated enforcer) | Cache-aware projection / `CoveredPrefixHash` | **DROP** enforcer | Upstream owns prefix; dual rewrite kills cache. |
-| 7 | **Local enhanced metrics** | **Live** counters + `~/.reasonix/enhanced-metrics.jsonl` | Provider telemetry (different purpose) | **KEEP** | Zero API tokens; observe AST/harness/backtrack. |
+| 7 | **Local enhanced metrics** | **Live** counters + JSONL + **doctor /status surface** | Provider telemetry (different purpose) | **KEEP** | Zero API tokens; observe AST/harness/backtrack thrift. |
 
 ---
 
@@ -117,6 +117,9 @@ DONE  P9  Tighter package detection / multi-module monorepos:
          nested go.mod → cd module + go test ./pkg; auto on go.work /
          depth-1 modules; bound findUp to workDir; skip non-Go inputs;
          python package scope via nearest pyproject/pytest markers
+DONE  P10 Enhanced metrics visibility (G5): FormatCompact + disk JSONL
+         summary; `reasonix doctor` enhanced section; `doctor enhanced`;
+         `/status` line when process counters non-zero
 
 NEXT  (only if gates G1–G5 pass)
       - Never: system-prompt quality hacks, dual undo, dual prefix enforcers

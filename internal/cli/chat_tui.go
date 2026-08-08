@@ -26,6 +26,7 @@ import (
 	"reasonix/internal/command"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/enhancedmetrics"
 	"reasonix/internal/event"
 	"reasonix/internal/hook"
 	"reasonix/internal/i18n"
@@ -4816,6 +4817,10 @@ func (m *chatTUI) showStatusDetails() {
 		lines = append(lines, "  mouse      "+tag)
 	}
 	lines = append(lines, "  config     "+activeConfigTag())
+	// reasonix-enhanced host counters (process-local; never leave the machine).
+	if compact := enhancedmetrics.Snapshot().FormatCompact(); compact != "" {
+		lines = append(lines, "  enhanced   "+compact)
+	}
 	m.commitLine(strings.Join(lines, "\n"))
 }
 

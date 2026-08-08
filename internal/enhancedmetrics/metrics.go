@@ -5,8 +5,10 @@ package enhancedmetrics
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,7 +46,14 @@ func SetPersistPath(path string) {
 	persistMu.Unlock()
 }
 
-// Snapshot returns current counters.
+// PersistPath returns the active JSONL path, or empty when persistence is off.
+func PersistPath() string {
+	persistMu.Lock()
+	defer persistMu.Unlock()
+	return persistPath
+}
+
+// Snapshot returns current process-local counters.
 func Snapshot() Counters {
 	return Counters{
 		ASTRejects:         astRejects.Load(),
@@ -54,6 +63,52 @@ func Snapshot() Counters {
 		HarnessSkipped:     harnessSkipped.Load(),
 		HarnessSilentPass:  harnessSilentPass.Load(),
 		BacktrackTriggered: backtrackTriggered.Load(),
+	}
+}
+
+// Zero reports whether every counter is zero.
+func (c Counters) Zero() bool {
+	return c.ASTRejects == 0 &&
+		c.HarnessAttempted == 0 &&
+		c.HarnessPassed == 0 &&
+		c.HarnessFailed == 0 &&
+		c.HarnessSkipped == 0 &&
+		c.HarnessSilentPass == 0 &&
+		c.BacktrackTriggered == 0
+}
+
+// FormatCompact returns one short diagnostic line for /status (empty if Zero).
+// Never includes file paths or command text — safe for issue reports.
+func (c Counters) FormatCompact() string {
+	if c.Zero() {
+		return ""
+	}
+	// thrift ratio: silent passes / passes (how often success stayed out of context)
+	parts := []string{
+		fmt.Sprintf("ast_rej=%d", c.ASTRejects),
+		fmt.Sprintf("harness=%d/%d/%d", c.HarnessPassed, c.HarnessFailed, c.HarnessSkipped),
+		fmt.Sprintf("silent=%d", c.HarnessSilentPass),
+		fmt.Sprintf("backtrack=%d", c.BacktrackTriggered),
+	}
+	return strings.Join(parts, " ")
+}
+
+// FormatLines returns multi-line detail for doctor / expanded diagnostics.
+func (c Counters) FormatLines(prefix string) []string {
+	if c.Zero() {
+		return nil
+	}
+	if prefix == "" {
+		prefix = "  "
+	}
+	return []string{
+		fmt.Sprintf("%sast rejects     %d", prefix, c.ASTRejects),
+		fmt.Sprintf("%sharness pass    %d", prefix, c.HarnessPassed),
+		fmt.Sprintf("%sharness fail    %d", prefix, c.HarnessFailed),
+		fmt.Sprintf("%sharness skip    %d", prefix, c.HarnessSkipped),
+		fmt.Sprintf("%ssilent pass     %d  (zero tool-result text on success)", prefix, c.HarnessSilentPass),
+		fmt.Sprintf("%sbacktrack       %d", prefix, c.BacktrackTriggered),
+		fmt.Sprintf("%sattempts        %d", prefix, c.HarnessAttempted),
 	}
 }
 

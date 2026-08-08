@@ -15,6 +15,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
+	"reasonix/internal/enhancedmetrics"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/netclient"
 	"reasonix/internal/sandbox"
@@ -40,7 +41,27 @@ type Report struct {
 	Sandbox    SandboxReport    `json:"sandbox"`
 	Network    NetworkReport    `json:"network"`
 	Permission PermissionReport `json:"permission"`
-	Warnings   []string         `json:"warnings,omitempty"`
+	// Enhanced is reasonix-enhanced host reliability counters (local only).
+	Enhanced EnhancedReport `json:"enhanced,omitempty"`
+	Warnings []string       `json:"warnings,omitempty"`
+}
+
+// EnhancedReport surfaces process + on-disk thrift/quality counters (G5).
+type EnhancedReport struct {
+	Process enhancedmetrics.Counters    `json:"process"`
+	Disk    enhancedmetrics.DiskSummary `json:"disk"`
+	Config  EnhancedConfigReport        `json:"config"`
+}
+
+// EnhancedConfigReport is a redacted snapshot of fork knobs (no secrets).
+type EnhancedConfigReport struct {
+	ASTGuardEnabled      bool   `json:"ast_guard_enabled"`
+	HarnessMode          string `json:"harness_mode"`
+	HarnessSilentPass    bool   `json:"harness_silent_pass"`
+	HarnessMaxAttempts   int    `json:"harness_max_attempts_per_turn"`
+	HarnessScope         string `json:"harness_scope"`
+	HarnessEnabledHere   bool   `json:"harness_enabled_for_cwd"`
+	BacktrackFollows     bool   `json:"backtrack_follows_harness"`
 }
 
 type ConfigReport struct {
@@ -226,7 +247,42 @@ func Collect(opts Options) Report {
 			Target:    pluginTarget(p),
 		})
 	}
+	report.Enhanced = collectEnhanced(cfg, cwd)
 	return report
+}
+
+func collectEnhanced(cfg *config.Config, cwd string) EnhancedReport {
+	diskPath := enhancedmetrics.PersistPath()
+	if diskPath == "" {
+		diskPath = enhancedmetrics.DefaultPersistPath(config.ReasonixHomeDir())
+	}
+	harnessHere := false
+	if cfg != nil {
+		harnessHere = cfg.HarnessEnabledForRoot(cwd)
+	}
+	er := EnhancedReport{
+		Process: enhancedmetrics.Snapshot(),
+		Disk:    enhancedmetrics.ReadDiskSummary(diskPath),
+		Config: EnhancedConfigReport{
+			ASTGuardEnabled:    cfg != nil && cfg.ASTGuardEnabled(),
+			HarnessMode:        "auto",
+			HarnessSilentPass:  true,
+			HarnessMaxAttempts: 0,
+			HarnessScope:       "package",
+			HarnessEnabledHere: harnessHere,
+			BacktrackFollows:   true,
+		},
+	}
+	if cfg != nil {
+		er.Config.HarnessMode = cfg.HarnessMode()
+		er.Config.HarnessSilentPass = cfg.HarnessSilentPass()
+		er.Config.HarnessMaxAttempts = cfg.HarnessMaxAttemptsPerTurn()
+		er.Config.HarnessScope = cfg.HarnessScope()
+		er.Config.BacktrackFollows = cfg.BacktrackEnabled(harnessHere)
+	}
+	// Redact absolute home from disk path for reports.
+	er.Disk.Path = redactHome(er.Disk.Path)
+	return er
 }
 
 func RenderText(r Report) string {
@@ -244,6 +300,37 @@ func RenderText(r Report) string {
 	// up top, not buried under the full report where they read as "all fine".
 	for _, w := range r.Warnings {
 		fmt.Fprintf(&b, "  warning: %s\n", w)
+	}
+
+	fmt.Fprintf(&b, "\nenhanced (local quality / thrift — not sent to providers)\n")
+	fmt.Fprintf(&b, "  ast_guard    %v\n", r.Enhanced.Config.ASTGuardEnabled)
+	maxTurn := r.Enhanced.Config.HarnessMaxAttempts
+	maxTurnNote := fmt.Sprintf("%d", maxTurn)
+	if maxTurn == 0 {
+		maxTurnNote = "0(default 12)"
+	} else if maxTurn < 0 {
+		maxTurnNote = "unlimited"
+	}
+	fmt.Fprintf(&b, "  harness      mode=%s scope=%s silent_pass=%v max_per_turn=%s enabled_here=%v\n",
+		r.Enhanced.Config.HarnessMode,
+		r.Enhanced.Config.HarnessScope,
+		r.Enhanced.Config.HarnessSilentPass,
+		maxTurnNote,
+		r.Enhanced.Config.HarnessEnabledHere,
+	)
+	fmt.Fprintf(&b, "  backtrack    active=%v\n", r.Enhanced.Config.BacktrackFollows)
+	if !r.Enhanced.Process.Zero() {
+		fmt.Fprintf(&b, "  process      %s\n", r.Enhanced.Process.FormatCompact())
+	} else {
+		fmt.Fprintf(&b, "  process      (no counters this process yet)\n")
+	}
+	if r.Enhanced.Disk.Exists {
+		fmt.Fprintf(&b, "  disk         %s\n", r.Enhanced.Disk.ToCounters().FormatCompact())
+		if r.Enhanced.Disk.Path != "" {
+			fmt.Fprintf(&b, "  disk_log     %s (%d events)\n", r.Enhanced.Disk.Path, r.Enhanced.Disk.Events)
+		}
+	} else {
+		fmt.Fprintf(&b, "  disk         (no enhanced-metrics.jsonl yet)\n")
 	}
 
 	fmt.Fprintf(&b, "\nproviders\n")

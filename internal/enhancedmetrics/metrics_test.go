@@ -42,4 +42,26 @@ func TestCountersAndPersist(t *testing.T) {
 			t.Fatalf("persist missing %s in %s", kind, text)
 		}
 	}
+
+	if s.FormatCompact() == "" {
+		t.Fatal("FormatCompact should be non-empty with activity")
+	}
+	if lines := s.FormatLines("  "); len(lines) < 5 {
+		t.Fatalf("FormatLines = %v", lines)
+	}
+
+	disk := ReadDiskSummary(path)
+	if !disk.Exists || disk.Events < 5 {
+		t.Fatalf("disk summary = %+v", disk)
+	}
+	if disk.ASTRejects != 1 || disk.HarnessSilentPass != 1 || disk.BacktrackTriggered != 1 {
+		t.Fatalf("disk counters = %+v", disk)
+	}
+}
+
+func TestFormatCompactEmpty(t *testing.T) {
+	Reset()
+	if Snapshot().FormatCompact() != "" {
+		t.Fatal("zero counters must format empty")
+	}
 }

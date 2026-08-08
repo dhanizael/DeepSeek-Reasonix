@@ -7,7 +7,9 @@ import (
 	"os"
 	"strings"
 
+	"reasonix/internal/config"
 	"reasonix/internal/doctor"
+	"reasonix/internal/enhancedmetrics"
 	"reasonix/internal/repair"
 )
 
@@ -26,6 +28,9 @@ func doctorCommand(args []string, version string) int {
 	}
 	if len(args) > 0 && args[0] == "repair" {
 		return doctorRepairCommand(args[1:])
+	}
+	if len(args) > 0 && args[0] == "enhanced" {
+		return doctorEnhancedCommand(args[1:], version)
 	}
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "print diagnostics as JSON")
@@ -98,6 +103,57 @@ func doctorRepairCommand(args []string) int {
 		if check.Exists && !check.Valid {
 			return 1
 		}
+	}
+	return 0
+}
+
+// doctorEnhancedCommand prints reasonix-enhanced thrift/quality counters only
+// (process + disk JSONL). Zero API tokens; local files only.
+func doctorEnhancedCommand(args []string, version string) int {
+	fs := flag.NewFlagSet("doctor enhanced", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "print as JSON")
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: reasonix doctor enhanced [--json]")
+		return 2
+	}
+	report := doctor.Collect(doctor.Options{Version: version})
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report.Enhanced); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Printf("reasonix %s doctor enhanced\n", version)
+	fmt.Printf("  config  mode=%s scope=%s silent_pass=%v max_per_turn=%d enabled_here=%v ast=%v\n",
+		report.Enhanced.Config.HarnessMode,
+		report.Enhanced.Config.HarnessScope,
+		report.Enhanced.Config.HarnessSilentPass,
+		report.Enhanced.Config.HarnessMaxAttempts,
+		report.Enhanced.Config.HarnessEnabledHere,
+		report.Enhanced.Config.ASTGuardEnabled,
+	)
+	if report.Enhanced.Process.Zero() {
+		fmt.Println("  process (idle this process)")
+	} else {
+		for _, ln := range report.Enhanced.Process.FormatLines("  ") {
+			fmt.Println(ln)
+		}
+	}
+	diskPath := enhancedmetrics.DefaultPersistPath(config.ReasonixHomeDir())
+	if p := enhancedmetrics.PersistPath(); p != "" {
+		diskPath = p
+	}
+	if report.Enhanced.Disk.Exists {
+		fmt.Printf("  disk    %s\n", report.Enhanced.Disk.ToCounters().FormatCompact())
+		fmt.Printf("  log     %s (%d events)\n", report.Enhanced.Disk.Path, report.Enhanced.Disk.Events)
+	} else {
+		fmt.Printf("  disk    (no log yet; will appear at %s after first AST/harness event)\n", diskPath)
 	}
 	return 0
 }
